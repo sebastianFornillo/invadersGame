@@ -1,0 +1,41 @@
+body {
+    margin: 0;
+    padding: 0;
+    background-image: url('./img/laminasentadajpg.jpg');
+    background-size: cover;
+    font-family: Arial, sans-serif;
+     /* animation: scrollBackground 20s linear infinite;   /* Ajusta la duración y el efecto según tus preferencias */
+}
+
+.welcome-screen {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: white;
+}
+
+#start-button {
+    background-color: #0074D9; 
+    background-image: url('./img/button.png');
+    background-size: cover;
+    color: white;
+    border-radius: 5px;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+
+
+
+
+@keyframes scrollBackground {
+    0% {
+        background-position: 0 0;
+    }
+    100% {
+        background-position: 0 -2100px; /* Ajusta la cantidad de desplazamiento vertical */
+    }
+}
