@@ -4,7 +4,7 @@ const c = canvas.getContext('2d')
  const point = document.querySelector('.point') 
 const div = document.querySelector('.di')
 const span = document.querySelector('span')
-
+const body = document.body;
 
 
 canvas.width = 1024
@@ -191,7 +191,7 @@ shoot(invaderProjectile){
         },
         velocity :{
             x: 0,
-            y: 5
+            y: 8
             }
         }))
     }
@@ -232,6 +232,7 @@ class Grid {
         }
     }
 }
+/* VARIABLES  */
 
 const player = new Player()
 const projectiles = []
@@ -251,6 +252,7 @@ const keys = {
     }
 }
 
+let scrollPosition = 0;
 let frames = 0
 let ramdomIntervalo = Math.floor((Math.random() * 500) + 500)
 let puntuacion = 0
@@ -276,6 +278,8 @@ for(let i = 0; i < 115; i++){
     }))
 }
 
+/* FUNCIONES  */
+
 function createParticle({object, color, fades}){
     for(let i = 0; i < 15; i++){ 
         particles.push(new Particle({
@@ -292,9 +296,53 @@ function createParticle({object, color, fades}){
             fades:fades
         }))
         }
-
 }
 
+function animateBackground() {
+    scrollPosition += -0.3; // Ajusta la velocidad de desplazamiento
+    body.style.backgroundPosition = `0 ${scrollPosition}px`;
+    requestAnimationFrame(animateBackground);
+}
+
+function animateEle(element) {
+    // Establecer los estilos iniciales
+    element.style.opacity = '0';
+    element.style.transform = 'rotateY(90deg)';
+    element.style.filter = 'blur(10px)';
+  
+    // Animación utilizando setInterval
+    let startTime = null;
+    const duration = 1000; // Duración de la animación en milisegundos
+  
+    function step(timestamp) {
+      if (!startTime) startTime = timestamp;
+      const progress = timestamp - startTime;
+  
+      // Calcular los valores intermedios
+      const opacity = progress / duration;
+      const rotation = 90 - (90 * opacity);
+      const blur = 10 - (10 * opacity);
+  
+      // Aplicar los estilos
+      element.style.opacity = opacity;
+      element.style.transform = `rotateY(${rotation}deg)`;
+      element.style.filter = `blur(${blur}px)`;
+  
+      if (progress < duration) {
+        // Continuar la animación
+        requestAnimationFrame(step);
+      } else {
+        // Animación completa
+        element.style.opacity = '1';
+        element.style.transform = 'rotateY(0deg)';
+        element.style.filter = 'blur(0px)';
+      }
+    }
+    // Iniciar la animación
+    requestAnimationFrame(step);
+  }
+  
+/*   FUNCION PRINCIPAL  */
 function animate() {
     if(!game.active) return
     requestAnimationFrame(animate)
@@ -341,6 +389,7 @@ function animate() {
                 game.active = false
                 
                }, 2000)
+
                setTimeout(()=>{
                 canvas.style.display ="none";
                 span.textContent = "Game Over";
@@ -354,6 +403,7 @@ function animate() {
                 let btn = document.querySelector('.btn');
                 btn.style.backgroundImage= `url("./img/button.png")`;
                 btn.style.backgroundSize = "cover";
+                btn.style.cursor = "pointer"
                 btn.style.color ="white";
                 btn.style.fontWeight ="700";
                 btn.style.fontSize = "16px";
@@ -361,8 +411,19 @@ function animate() {
                 btn.style.padding = "16px 50px";
                 point.style.width = "300px";
                 point.style.transform = "translate(-50% , -50%)";
-                
+                animateEle(btn); 
+                btn.addEventListener('click', function () {
+                  window.location.href = './index.html'; // Cambia esto por la ruta correcta
+                });
+            
                }, 4000)
+
+               setTimeout(()=>{
+                point.style.display= "none"
+                body.style.backgroundImage = 'url(./img/gameover.png)'
+                body.style.backgroundSize = "cover"
+                animateBackground()
+               }, 10000)
 
             createParticle({
                 object: player,
@@ -459,6 +520,9 @@ function animate() {
     }
     
     animate() 
+    
+
+    // movimientos flechas y disparos
 
     addEventListener('keydown', ({ key }) =>{
         

@@ -1,9 +1,10 @@
 body {
     margin: 0;
     padding: 0;
-    background-image: url('./img/laminasentadajpg.jpg');
+    background-image: url('./img/espacio2.jpg');
     background-size: cover;
     font-family: Arial, sans-serif;
+    /* animation: animateTitulo 2s 1; */
      /* animation: scrollBackground 20s linear infinite;   /* Ajusta la duración y el efecto según tus preferencias */
 }
 
@@ -14,22 +15,23 @@ body {
     transform: translate(-50%, -50%);
     text-align: center;
     color: white;
+    
 }
 
 #start-button {
     background-color: #0074D9; 
-    background-image: url('./img/button.png');
-    background-size: cover;
+   /*  background-image: url('./img/button.png');
+    background-size: cover; */
     color: white;
     border-radius: 5px;
     padding: 10px 20px;
     font-size: 16px;
     cursor: pointer;
+   
 }
 
 
-
-
+/* ANIMACIONES */
 
 @keyframes scrollBackground {
     0% {
@@ -39,3 +41,16 @@ body {
         background-position: 0 -2100px; /* Ajusta la cantidad de desplazamiento vertical */
     }
 }
+
+@keyframes animateTitulo{
+    0%{
+      opacity: 0%;
+      transform: rotateY(90deg);
+      filter: blur(10px);
+    }
+    100%{
+      opacity: 1;
+      transform: rotateY(0deg);
+      filter: blur(0px);
+    }
+  }
