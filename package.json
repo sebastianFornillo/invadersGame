@@ -13,12 +13,14 @@
     "preview": "npm run build && python3 -m http.server 4173 --bind 127.0.0.1 --directory dist",
     "lint": "eslint .",
     "test": "playwright test",
+    "test:db": "psql \"$DATABASE_URL\" -q -v ON_ERROR_STOP=1 -f supabase/tests/setup.sql -f supabase/schema.sql -f supabase/tests/schema.test.sql",
     "check": "npm run lint && npm test"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
     "@playwright/test": "1.63.0",
     "eslint": "9.39.1",
-    "globals": "16.5.0"
+    "globals": "16.5.0",
+    "pg": "8.16.3"
   }
 }

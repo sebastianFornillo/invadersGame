@@ -14,6 +14,8 @@ import { Sound } from './sound.js';
 import {
   vibrate, setupPWA, promptInstall, toggleFullscreen, fullscreenSupported, needsIosInstallHint,
 } from './platform.js';
+import { online, api, league } from './online.js';
+import { ui } from './ui.js';
 
 // Modo test (?test=1): expone ganchos para los tests automáticos.
 const TEST_MODE = new URLSearchParams(location.search).has('test');
@@ -161,6 +163,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Enter' || e.code === 'Space') confirm();
   if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
   if (e.code === 'KeyM') { Sound.toggle(); syncMute(); }
+  if (e.code === 'KeyR') openRankingFromGame();
 });
 window.addEventListener('keyup', (e) => {
   const k = KEYMAP[e.code];
@@ -206,6 +209,15 @@ const installBtn = document.getElementById('installBtn');
 setupPWA({ onInstallAvailable: (on) => { if (installBtn) installBtn.hidden = !on; } });
 if (installBtn) installBtn.addEventListener('click', () => promptInstall());
 const iosHint = needsIosInstallHint();
+
+const rankBtn = document.getElementById('rankBtn');
+if (rankBtn) {
+  rankBtn.hidden = !online.enabled;
+  rankBtn.addEventListener('click', () => openRankingFromGame());
+}
+// Los botones del HUD no se quedan con el foco (si no, Espacio los "aprieta")
+document.querySelectorAll('.hud-buttons button').forEach((b) => b.addEventListener('click', () => b.blur()));
+ui.handleInvite();
 canvas.addEventListener('pointerdown', () => { Sound.unlock(); if (state !== 'playing') confirm(); });
 
 function pollGamepad() {
@@ -220,8 +232,9 @@ function pollGamepad() {
   if (b(15)) input.padX = 1;
   input.padFire = b(0) || b(7) || b(5);
   const edge = (i) => b(i) && !input.padPrev[i];
-  if (edge(0) || edge(9)) { Sound.unlock(); if (state !== 'playing') confirm(); }
-  if (edge(9) && state === 'playing') togglePause();
+  const actions = !ui.isOpen();
+  if (actions && (edge(0) || edge(9))) { Sound.unlock(); if (state !== 'playing') confirm(); }
+  if (actions && edge(9) && state === 'playing') togglePause();
   input.padPrev = { 0: b(0), 9: b(9) };
 }
 
@@ -239,6 +252,8 @@ let score, wave, lives, nextLife, combo, comboTimer, maxCombo, stats, newRecord;
 let player, bullets, enemyBullets, invaders, boss, ufo, ufoTimer, powerups, bunkers;
 let particles = [], texts = [];
 let F, cfg, banner, clearTimer, waveHits, deathTimer, marchTimer, marchStep;
+// Ranking online: partida registrada en el servidor y si se usaron trucos de test
+let runId = null, runToken = 0, cheated = false;
 
 const stars = [];
 [[90, 1, 14], [50, 1.6, 38], [24, 2.4, 85]].forEach(([n, s, v], l) => {
@@ -273,7 +288,20 @@ function newGame() {
   boss = null; ufo = null; ufoTimer = rand(14, 22);
   deathTimer = 0; marchTimer = 0; marchStep = 0;
   state = 'playing'; stateTime = 0;
+  if (ui.isOpen()) ui.close();
+  registerRun();
   startWave(1);
+}
+
+// Avisa al servidor que empezó una partida (necesario para guardar el puntaje)
+function registerRun() {
+  runId = null;
+  cheated = false;
+  const token = ++runToken;
+  if (!online.enabled) return;
+  api.startRun('classic')
+    .then((r) => { if (token === runToken && r) runId = r.run_id; })
+    .catch(() => { /* sin ranking para esta partida */ });
 }
 
 function startWave(n) {
@@ -807,6 +835,33 @@ function gameOver() {
     store.set('invaders.highscores', highscores);
   }
   Sound.over();
+  offerSubmit();
+}
+
+function offerSubmit() {
+  if (!online.enabled || score <= 0 || cheated || !runId) return;
+  const run = { run: runId, score, wave, kills: stats.kills, token: runToken };
+  setTimeout(() => {
+    if (state !== 'gameover' || run.token !== runToken || ui.isOpen()) return;
+    input.keys.clear();
+    ui.openSubmit({
+      score: run.score,
+      wave: run.wave,
+      title: newRecord ? '¡NUEVO RÉCORD!' : 'GUARDAR PUNTAJE',
+      submit: (name) => {
+        const lg = league.get();
+        return api.submitScore({ ...run, name, leagueCode: lg && lg.code });
+      },
+      onPlayAgain: () => newGame(),
+    });
+  }, 1100);
+}
+
+function openRankingFromGame(scope) {
+  if (!online.enabled || ui.isOpen()) return;
+  if (state === 'playing') togglePause();
+  input.keys.clear();
+  ui.openRanking({ scope });
 }
 
 // ------------------------------------------------------------------
@@ -1251,6 +1306,11 @@ function drawMenu() {
     drawText(isTouch() ? 'TAP TO START' : 'PRESS ENTER TO START', W / 2, 380, { size: 16, color: '#ffffff', glow: '#ffffff', blur: 10 });
   }
   drawText('HI-SCORE ' + String(best()).padStart(7, '0'), W / 2, 430, { size: 11, color: '#ff4fd8' });
+  if (online.enabled) {
+    const lg = league.get();
+    const label = (isTouch() ? '🏆' : 'R') + ' = RANKING ONLINE' + (lg ? '  ·  LIGA ' + lg.name.toUpperCase() : '');
+    drawText(label, W / 2, 458, { size: 9, color: '#ffd23f' });
+  }
   drawText('MOVE < > / A D     FIRE SPACE     PAUSE P     MUTE M', W / 2, 500, { size: 9, color: '#8a86b8' });
   drawText('GAMEPAD SUPPORTED', W / 2, 522, { size: 8, color: '#5a5688' });
   if (iosHint) {
@@ -1290,8 +1350,11 @@ function drawGameOver() {
     const mine = h.score === score && newRecord && i === 0;
     drawText(`${i + 1}. ${String(h.score).padStart(7, '0')}  W${h.wave}`, W / 2 + 150, 218 + i * 22, { size: 10, color: mine ? '#ffd23f' : '#ffffff' });
   });
-  if (stateTime > 1 && Math.floor(time * 2) % 2 === 0) {
+  if (stateTime > 1 && !ui.isOpen() && Math.floor(time * 2) % 2 === 0) {
     drawText(isTouch() ? 'TAP TO PLAY AGAIN' : 'PRESS ENTER TO PLAY AGAIN', W / 2, 470, { size: 14, glow: '#ffffff', blur: 8 });
+  }
+  if (online.enabled && stateTime > 1 && !ui.isOpen()) {
+    drawText(isTouch() ? '🏆 = RANKING ONLINE' : 'R = RANKING ONLINE', W / 2, 505, { size: 9, color: '#ffd23f' });
   }
 }
 
@@ -1361,12 +1424,15 @@ if (TEST_MODE) {
     get playerX() { return player ? player.x : 0; },
     get boss() { return boss ? { hp: boss.hp, maxHp: boss.maxHp } : null; },
     start: () => newGame(),
-    skipTo(n) { if (state === 'playing') startWave(n); },
+    get runId() { return runId; },
+    get cheated() { return cheated; },
+    skipTo(n) { if (state === 'playing') { cheated = true; startWave(n); } },
     killAll() {
+      cheated = true;
       if (invaders) invaders.forEach((i) => (i.dead = true));
       if (boss && boss.dying <= 0) { boss.dying = 0.2; boss.boomTimer = 0; }
     },
-    addScore(n) { addScore(n); },
+    addScore(n) { cheated = true; addScore(n); },
     die() { if (player && player.alive) { lives = 1; player.invuln = 0; player.shield = false; hitPlayer(); } },
   };
 }
