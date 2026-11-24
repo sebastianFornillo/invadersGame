@@ -22,6 +22,8 @@ export default defineConfig({
     command: `npm run build && python3 -m http.server ${PORT} --bind 127.0.0.1 --directory dist`,
     url: `http://127.0.0.1:${PORT}/index.html`,
     reuseExistingServer: false,
+    // Los tests nunca usan la base de producción
+    env: { INVADERS_TEST_BUILD: '1' },
     stderr: 'ignore',
   },
   projects: [
