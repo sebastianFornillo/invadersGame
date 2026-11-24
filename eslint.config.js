@@ -16,6 +16,8 @@ export default [
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       eqeqeq: ['error', 'smart'],
+      // Detecta usar una variable let/const antes de declararla (error en tiempo de carga)
+      'no-use-before-define': ['error', { functions: false, classes: true, variables: false }],
     },
   },
   {

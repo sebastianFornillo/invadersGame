@@ -17,6 +17,7 @@ Shooter arcade inspirado en Space Invaders, en JavaScript puro: sin frameworks n
 - Jefe cada 5 oleadas, OVNI misterioso, power-ups y búnkers destructibles
 - Combos hasta x5, vida extra cada 25.000 puntos, top 5 local
 - Sonido sintetizado (WebAudio), partículas, efecto CRT
+- **Desafío diario:** las mismas oleadas para todos cada día (azar con semilla), un intento oficial, resultado para compartir con emojis y ranking de HOY
 - **App instalable (PWA):** se agrega a la pantalla de inicio y funciona sin internet
 - Vibración en Android, pantalla completa, vista previa al compartir el link
 
@@ -32,6 +33,7 @@ Cómo funciona:
 - Al empezar, el juego registra la partida (`start_run`); al perder ofrece guardar el puntaje con un nombre (`submit_score`).
 - Las tablas están cerradas (RLS sin políticas): la clave pública sólo puede usar las funciones, que validan nombre, duración y puntaje posible para frenar trampas obvias.
 - Liga privada: se crea desde el ranking y se comparte con un link `?liga=CODIGO` (por WhatsApp, por ejemplo).
+- Desafío diario: `?modo=diario` abre el juego con el desafío elegido. El día cambia a las 00:00 UTC (21:00 en Argentina) y el servidor acepta un puntaje diario por dispositivo.
 - Privacidad: se guarda el nombre que elige el jugador, el puntaje, la oleada, un ID anónimo del dispositivo y un hash de la IP para limitar abusos. No hay cuentas ni emails.
 
 ## Desarrollo
@@ -70,6 +72,8 @@ src/platform.js       PWA, vibración, pantalla completa
 src/config.js         URL y clave pública de Supabase (opcional)
 src/online.js         cliente del ranking (fetch a las funciones RPC)
 src/ui.js             pantallas de ranking, ligas y guardar puntaje
+src/rng.js            azar con semilla (una corriente por sistema)
+src/daily.js          desafío diario: día UTC, intento, texto para compartir
 supabase/schema.sql   tablas, seguridad y funciones del ranking
 tests/                tests de Playwright
 ```

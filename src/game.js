@@ -16,6 +16,8 @@ import {
 } from './platform.js';
 import { online, api, league } from './online.js';
 import { ui } from './ui.js';
+import { createStreams, randomSeed } from './rng.js';
+import { todayUTC, dailySeed, dailyRecord, formatDay, gridText } from './daily.js';
 
 // Modo test (?test=1): expone ganchos para los tests automáticos.
 const TEST_MODE = new URLSearchParams(location.search).has('test');
@@ -55,6 +57,13 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// Azar de la jugabilidad, con semilla (el desafío diario es igual para todos).
+// Los efectos visuales siguen usando Math.random.
+const STREAMS = ['fire', 'dive', 'ufo', 'drop', 'bunker'];
+let R = createStreams(randomSeed(), STREAMS);
+const rr = (stream, a, b) => a + R[stream]() * (b - a);
+const rpick = (stream, arr) => arr[Math.floor(R[stream]() * arr.length)];
 const overlap = (a, b) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 function compact(arr) {
@@ -160,6 +169,10 @@ window.addEventListener('keydown', (e) => {
   if (k || e.code === 'Enter') e.preventDefault();
   if (k) input.keys.add(k);
   if (e.repeat) return;
+  if (state === 'menu') {
+    const sel = e.code === 'ArrowLeft' || e.code === 'KeyA' ? 0 : e.code === 'ArrowRight' || e.code === 'KeyD' ? 1 : -1;
+    if (sel >= 0 && sel !== menuSel) { menuSel = sel; Sound.march(sel); }
+  }
   if (e.code === 'Enter' || e.code === 'Space') confirm();
   if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
   if (e.code === 'KeyM') { Sound.toggle(); syncMute(); }
@@ -218,7 +231,15 @@ if (rankBtn) {
 // Los botones del HUD no se quedan con el foco (si no, Espacio los "aprieta")
 document.querySelectorAll('.hud-buttons button').forEach((b) => b.addEventListener('click', () => b.blur()));
 ui.handleInvite();
-canvas.addEventListener('pointerdown', () => { Sound.unlock(); if (state !== 'playing') confirm(); });
+canvas.addEventListener('pointerdown', (e) => {
+  Sound.unlock();
+  if (state === 'menu') {
+    const { x, y } = toCanvas(e);
+    const hit = menuHit(x, y);
+    if (hit >= 0) menuSel = hit;
+  }
+  if (state !== 'playing') confirm();
+});
 
 function pollGamepad() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -254,6 +275,19 @@ let particles = [], texts = [];
 let F, cfg, banner, clearTimer, waveHits, deathTimer, marchTimer, marchStep;
 // Ranking online: partida registrada en el servidor y si se usaron trucos de test
 let runId = null, runToken = 0, cheated = false;
+// Modo: 'classic' o 'daily' (desafío diario). La práctica del diario no se registra.
+let mode = 'classic', practice = false, dailyDay = null, waveLog = [], menuSel = 0;
+
+// Link directo al desafío: ?modo=diario abre el menú con esa opción elegida
+{
+  const params = new URLSearchParams(location.search);
+  if (params.get('modo') === 'diario') {
+    menuSel = 1;
+    params.delete('modo');
+    const rest = params.toString();
+    history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+  }
+}
 
 const stars = [];
 [[90, 1, 14], [50, 1.6, 38], [24, 2.4, 85]].forEach(([n, s, v], l) => {
@@ -275,7 +309,12 @@ function waveConfig(n) {
   };
 }
 
-function newGame() {
+function newGame({ mode: m = 'classic', day = null, practice: p = false } = {}) {
+  mode = m;
+  practice = m === 'daily' && p;
+  dailyDay = m === 'daily' ? day || todayUTC() : null;
+  R = createStreams(m === 'daily' ? dailySeed(dailyDay) : randomSeed(), STREAMS);
+  waveLog = [];
   score = 0; wave = 0; lives = 3; nextLife = EXTRA_LIFE_EVERY;
   combo = 0; comboTimer = 0; maxCombo = 0; newRecord = false;
   stats = { shots: 0, hits: 0, kills: 0 };
@@ -285,10 +324,11 @@ function newGame() {
   };
   bullets = []; enemyBullets = []; invaders = []; powerups = [];
   particles = []; texts = [];
-  boss = null; ufo = null; ufoTimer = rand(14, 22);
+  boss = null; ufo = null; ufoTimer = rr('ufo', 14, 22);
   deathTimer = 0; marchTimer = 0; marchStep = 0;
   state = 'playing'; stateTime = 0;
   if (ui.isOpen()) ui.close();
+  if (mode === 'daily' && !practice) dailyRecord.start(dailyDay);
   registerRun();
   startWave(1);
 }
@@ -298,8 +338,8 @@ function registerRun() {
   runId = null;
   cheated = false;
   const token = ++runToken;
-  if (!online.enabled) return;
-  api.startRun('classic')
+  if (!online.enabled || practice) return;
+  api.startRun(mode)
     .then((r) => { if (token === runToken && r) runId = r.run_id; })
     .catch(() => { /* sin ranking para esta partida */ });
 }
@@ -412,7 +452,7 @@ function updateFormation(dt) {
   // Disparo: sólo el invasor más bajo de cada columna puede disparar
   F.fireTimer -= dt;
   if (F.fireTimer <= 0) {
-    F.fireTimer = cfg.fireInterval * rand(0.6, 1.4);
+    F.fireTimer = cfg.fireInterval * rr('fire', 0.6, 1.4);
     const bottom = {};
     for (const inv of invaders) {
       if (inv.state !== 'formation') continue;
@@ -420,8 +460,8 @@ function updateFormation(dt) {
     }
     const shooters = Object.values(bottom);
     if (shooters.length) {
-      const s = pick(shooters);
-      enemyShot(s.x + s.w / 2, s.y + s.h, Math.random() < cfg.aimed);
+      const s = rpick('fire', shooters);
+      enemyShot(s.x + s.w / 2, s.y + s.h, R.fire() < cfg.aimed);
     }
   }
 
@@ -429,13 +469,13 @@ function updateFormation(dt) {
   if (cfg.dive) {
     F.diveTimer -= dt;
     if (F.diveTimer <= 0) {
-      F.diveTimer = cfg.diveInterval * rand(0.7, 1.3);
+      F.diveTimer = cfg.diveInterval * rr('dive', 0.7, 1.3);
       const candidates = invaders.filter((i) => i.state === 'formation');
       if (candidates.length) {
-        const d = pick(candidates);
+        const d = rpick('dive', candidates);
         d.state = 'dive'; d.t = 0; d.shot = false;
         d.speed = Math.min(170 + wave * 9, 320);
-        d.wob = Math.random() < 0.5 ? -1 : 1;
+        d.wob = R.dive() < 0.5 ? -1 : 1;
         Sound.ufo();
       }
     }
@@ -547,9 +587,9 @@ function updateUfo(dt) {
     if (cfg.boss || F.entering || !player.alive) return;
     ufoTimer -= dt;
     if (ufoTimer <= 0) {
-      const dir = Math.random() < 0.5 ? 1 : -1;
+      const dir = R.ufo() < 0.5 ? 1 : -1;
       ufo = { x: dir > 0 ? -70 : W + 10, y: 26, w: 60, h: 24, vx: dir * 170, beep: 0, dead: false };
-      ufoTimer = rand(16, 26);
+      ufoTimer = rr('ufo', 16, 26);
     }
     return;
   }
@@ -616,7 +656,7 @@ function erode(b, cc, cr, radius) {
     for (let c = cc - R; c <= cc + R; c++) {
       if (r < 0 || c < 0 || r >= BK_ROWS || c >= BK_COLS) continue;
       const d = Math.hypot(c - cc, r - cr);
-      if (d <= radius && (d < 1.2 || Math.random() < 0.65)) b.cells[r * BK_COLS + c] = 0;
+      if (d <= radius && (d < 1.2 || R.bunker() < 0.65)) b.cells[r * BK_COLS + c] = 0;
     }
   }
   b.dirty = true;
@@ -826,9 +866,13 @@ function updateDeath(dt) {
 
 function gameOver() {
   state = 'gameover'; stateTime = 0;
+  waveLog.push('💀');
   const prevBest = best();
-  newRecord = score > 0 && score > prevBest;
-  if (score > 0) {
+  newRecord = mode === 'classic' && score > 0 && score > prevBest;
+  if (mode === 'daily' && !practice) {
+    dailyRecord.finish(dailyDay, { score, wave, grid: waveLog.slice(), submitted: false });
+  }
+  if (mode === 'classic' && score > 0) {
     highscores.push({ score, wave, date: new Date().toISOString().slice(0, 10) });
     highscores.sort((a, b) => b.score - a.score);
     highscores = highscores.slice(0, 5);
@@ -839,22 +883,44 @@ function gameOver() {
 }
 
 function offerSubmit() {
-  if (!online.enabled || score <= 0 || cheated || !runId) return;
-  const run = { run: runId, score, wave, kills: stats.kills, token: runToken };
-  setTimeout(() => {
-    if (state !== 'gameover' || run.token !== runToken || ui.isOpen()) return;
-    input.keys.clear();
-    ui.openSubmit({
-      score: run.score,
-      wave: run.wave,
-      title: newRecord ? '¡NUEVO RÉCORD!' : 'GUARDAR PUNTAJE',
-      submit: (name) => {
-        const lg = league.get();
-        return api.submitScore({ ...run, name, leagueCode: lg && lg.code });
-      },
-      onPlayAgain: () => newGame(),
-    });
+  const daily = mode === 'daily';
+  const day = dailyDay;
+  const token = runToken;
+  const later = (fn) => setTimeout(() => {
+    if (state === 'gameover' && token === runToken && !ui.isOpen()) { input.keys.clear(); fn(); }
   }, 1100);
+
+  if (!online.enabled || score <= 0 || cheated || practice || !runId) {
+    // Sin ranking: el diario igual muestra el resultado para compartir
+    if (daily && !practice) later(() => openDailyPanel(day));
+    return;
+  }
+  const run = { run: runId, score, wave, kills: stats.kills };
+  const result = { day, score, wave, grid: waveLog.slice() };
+  later(() => ui.openSubmit({
+    score: run.score,
+    wave: run.wave,
+    title: daily ? `DESAFÍO ${formatDay(day)}` : newRecord ? '¡NUEVO RÉCORD!' : 'GUARDAR PUNTAJE',
+    scope: daily ? 'daily' : 'global',
+    submit: async (name) => {
+      const lg = league.get();
+      const res = await api.submitScore({ ...run, name, leagueCode: lg && lg.code });
+      if (daily) dailyRecord.update(day, { submitted: true, rank: res.world_rank, players: res.players });
+      return res;
+    },
+    onPlayAgain: daily ? null : () => newGame(),
+    extraActions: daily ? [{ label: 'COMPARTIR', onClick: () => ui.shareDaily(result) }] : [],
+  }));
+}
+
+function openDailyPanel(day = todayUTC()) {
+  input.keys.clear();
+  ui.openDaily({
+    day,
+    record: dailyRecord.get(day),
+    onPlay: () => newGame({ mode: 'daily', day }),
+    onPractice: () => newGame({ mode: 'daily', day, practice: true }),
+  });
 }
 
 function openRankingFromGame(scope) {
@@ -892,8 +958,8 @@ function addScore(n) {
 }
 
 function dropPower(x, y, forced = false) {
-  if (!forced && Math.random() > 0.075) return;
-  let r = Math.random(), type = 'T';
+  if (!forced && R.drop() > 0.075) return;
+  let r = R.drop(), type = 'T';
   for (const [k, v] of Object.entries(POWERS)) { if (r < v.weight) { type = k; break; } r -= v.weight; }
   if (type === 'L' && lives >= MAX_LIVES) type = 'S';
   powerups.push({ x: x - 13, y, w: 26, h: 26, vy: 110, type, t: 0, dead: false });
@@ -971,7 +1037,7 @@ function collisions() {
 
     if (ufo && overlap(b, ufo)) {
       b.dead = true; stats.hits++;
-      const pts = pick([300, 500, 800, 1000, 1500]);
+      const pts = rpick('ufo', [300, 500, 800, 1000, 1500]);
       addScore(pts);
       registerKill();
       floatText(ufo.x + 30, ufo.y + 12, '' + pts, '#ff4fd8', 14);
@@ -1044,6 +1110,7 @@ function update(dt) {
     const perfect = waveHits === 0 ? 1000 * wave : 0;
     addScore(bonus + perfect);
     banner = { text: 'WAVE CLEAR', sub: perfect ? 'PERFECT! +' + (bonus + perfect) : 'BONUS +' + bonus, t: 2.2, color: '#ffd23f' };
+    waveLog.push(cfg.boss ? '👑' : waveHits === 0 ? '🟩' : '🟨');
     Sound.clear();
     clearTimer = 2.4;
     enemyBullets.length = 0;
@@ -1229,8 +1296,10 @@ function drawHUD() {
     ctx.fillStyle = 'rgba(255,210,63,0.6)';
     ctx.fillRect(20, 50, 100 * (comboTimer / 1.6), 3);
   }
-  drawText('HI ' + String(Math.max(best(), score)).padStart(7, '0'), W / 2, 20, { size: 10, color: '#ff4fd8' });
-  drawText('WAVE ' + wave, W / 2, 38, { size: 9, color: '#5dc1b9' });
+  const hi = mode === 'classic' ? Math.max(best(), score) : best(); // el récord local es del modo normal
+  drawText('HI ' + String(hi).padStart(7, '0'), W / 2, 20, { size: 10, color: '#ff4fd8' });
+  const modeTag = mode === 'daily' ? (practice ? 'PRACTICE · ' : 'DAILY · ') : '';
+  drawText(modeTag + 'WAVE ' + wave, W / 2, 38, { size: 9, color: mode === 'daily' ? '#ffd23f' : '#5dc1b9' });
 
   for (let i = 0; i < lives; i++) drawShipIcon(16 + i * 34, H - 26, 0.32);
 
@@ -1302,20 +1371,48 @@ function drawMenu() {
   });
   drawText('UFO = ???', W / 2 + 240, ty, { size: 11, color: '#ff4fd8', align: 'left' });
 
-  if (Math.floor(time * 2) % 2 === 0) {
-    drawText(isTouch() ? 'TAP TO START' : 'PRESS ENTER TO START', W / 2, 380, { size: 16, color: '#ffffff', glow: '#ffffff', blur: 10 });
-  }
-  drawText('HI-SCORE ' + String(best()).padStart(7, '0'), W / 2, 430, { size: 11, color: '#ff4fd8' });
+  drawMenuOptions();
+  drawText('HI-SCORE ' + String(best()).padStart(7, '0'), W / 2, 446, { size: 11, color: '#ff4fd8' });
   if (online.enabled) {
     const lg = league.get();
     const label = (isTouch() ? '🏆' : 'R') + ' = RANKING ONLINE' + (lg ? '  ·  LIGA ' + lg.name.toUpperCase() : '');
-    drawText(label, W / 2, 458, { size: 9, color: '#ffd23f' });
+    drawText(label, W / 2, 470, { size: 9, color: '#ffd23f' });
   }
   drawText('MOVE < > / A D     FIRE SPACE     PAUSE P     MUTE M', W / 2, 500, { size: 9, color: '#8a86b8' });
   drawText('GAMEPAD SUPPORTED', W / 2, 522, { size: 8, color: '#5a5688' });
   if (iosHint) {
     drawText('IPHONE: SHARE > ADD TO HOME SCREEN TO INSTALL', W / 2, 548, { size: 7, color: '#5dc1b9' });
   }
+}
+
+function drawMenuOptions() {
+  MENU_OPTS.forEach((o, i) => {
+    const sel = i === menuSel;
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = sel ? '#ffffff' : 'rgba(93,193,185,0.45)';
+    ctx.fillStyle = sel ? 'rgba(93,193,185,0.24)' : 'rgba(5,1,15,0.55)';
+    if (sel) { ctx.shadowColor = '#5dc1b9'; ctx.shadowBlur = 18; }
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(o.x - 130, MENU_Y - 23, 260, 46, 10);
+    else ctx.rect(o.x - 130, MENU_Y - 23, 260, 46);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    drawText(o.label, o.x, MENU_Y + 1, { size: 13, color: sel ? '#ffffff' : '#8a86b8' });
+  });
+  let hint;
+  let color = '#ffffff';
+  if (menuSel === 1) {
+    const rec = dailyRecord.get();
+    color = '#ffd23f';
+    if (!rec) hint = 'SAME WAVES FOR EVERYONE  ·  1 TRY PER DAY';
+    else if (rec.status === 'done') hint = `TODAY: ${rec.score} PTS  ·  WAVE ${rec.wave}  ·  ${isTouch() ? 'TAP' : 'ENTER'} TO SHARE`;
+    else hint = "TODAY'S TRY IS USED  ·  PRACTICE AVAILABLE";
+  } else {
+    hint = isTouch() ? 'TAP TO START' : 'PRESS ENTER TO START  ·  < > TO CHOOSE';
+  }
+  if (menuSel === 1 || Math.floor(time * 2) % 2 === 0) drawText(hint, W / 2, 418, { size: 9, color });
 }
 
 function drawPause() {
@@ -1345,13 +1442,19 @@ function drawGameOver() {
     drawText(k, W / 2 - 240, 190 + i * 26, { size: 11, color: '#8a86b8', align: 'left' });
     drawText(v, W / 2 - 40, 190 + i * 26, { size: 11, align: 'right' });
   });
-  drawText('TOP 5', W / 2 + 150, 190, { size: 11, color: '#ff4fd8' });
-  highscores.forEach((h, i) => {
+  if (mode === 'daily') {
+    drawText(`DAILY ${formatDay(dailyDay)}${practice ? ' · PRACTICE' : ''}`, W / 2 + 150, 190, { size: 11, color: '#ffd23f' });
+    drawText(gridText(waveLog), W / 2 + 150, 230, { size: 18 });
+  } else {
+    drawText('TOP 5', W / 2 + 150, 190, { size: 11, color: '#ff4fd8' });
+  }
+  if (mode === 'classic') highscores.forEach((h, i) => {
     const mine = h.score === score && newRecord && i === 0;
     drawText(`${i + 1}. ${String(h.score).padStart(7, '0')}  W${h.wave}`, W / 2 + 150, 218 + i * 22, { size: 10, color: mine ? '#ffd23f' : '#ffffff' });
   });
   if (stateTime > 1 && !ui.isOpen() && Math.floor(time * 2) % 2 === 0) {
-    drawText(isTouch() ? 'TAP TO PLAY AGAIN' : 'PRESS ENTER TO PLAY AGAIN', W / 2, 470, { size: 14, glow: '#ffffff', blur: 8 });
+    const again = mode === 'daily' ? 'FOR MENU' : 'TO PLAY AGAIN';
+    drawText((isTouch() ? 'TAP ' : 'PRESS ENTER ') + again, W / 2, 470, { size: 14, glow: '#ffffff', blur: 8 });
   }
   if (online.enabled && stateTime > 1 && !ui.isOpen()) {
     drawText(isTouch() ? '🏆 = RANKING ONLINE' : 'R = RANKING ONLINE', W / 2, 505, { size: 9, color: '#ffd23f' });
@@ -1380,9 +1483,39 @@ function render() {
 function isTouch() { return touchUI && touchUI.classList.contains('on'); }
 
 function confirm() {
-  if (state === 'menu') { Sound.select(); newGame(); }
-  else if (state === 'gameover' && stateTime > 1) { Sound.select(); newGame(); }
+  if (state === 'menu') { Sound.select(); startFromMenu(); }
+  else if (state === 'gameover' && stateTime > 1) {
+    Sound.select();
+    if (mode === 'daily') backToMenu(1);
+    else newGame();
+  }
   else if (state === 'paused') togglePause();
+}
+
+function startFromMenu() {
+  if (menuSel === 1) openDailyPanel();
+  else newGame();
+}
+
+function backToMenu(sel = 0) {
+  state = 'menu'; stateTime = 0; menuSel = sel;
+  particles = []; texts = [];
+}
+
+// Opciones del menú (coordenadas del canvas lógico)
+const MENU_Y = 378;
+const MENU_OPTS = [
+  { label: 'PLAY', x: W / 2 - 150 },
+  { label: 'DAILY CHALLENGE', x: W / 2 + 150 },
+];
+
+function menuHit(px, py) {
+  return MENU_OPTS.findIndex((o) => Math.abs(px - o.x) <= 130 && Math.abs(py - MENU_Y) <= 23);
+}
+
+function toCanvas(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: ((e.clientX - r.left) * W) / r.width, y: ((e.clientY - r.top) * H) / r.height };
 }
 
 function togglePause() {
@@ -1425,6 +1558,11 @@ if (TEST_MODE) {
     get boss() { return boss ? { hp: boss.hp, maxHp: boss.maxHp } : null; },
     start: () => newGame(),
     get runId() { return runId; },
+    get mode() { return mode; },
+    get practice() { return practice; },
+    get menuSel() { return menuSel; },
+    get waveLog() { return waveLog.slice(); },
+    seedSample() { return [R.fire(), R.dive(), R.ufo(), R.drop(), R.bunker()]; },
     get cheated() { return cheated; },
     skipTo(n) { if (state === 'playing') { cheated = true; startWave(n); } },
     killAll() {
