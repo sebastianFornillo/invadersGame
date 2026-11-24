@@ -18,6 +18,9 @@ import { online, api, league } from './online.js';
 import { ui } from './ui.js';
 import { createStreams, randomSeed } from './rng.js';
 import { settings } from './settings.js';
+import {
+  drawRock, drawJelly, drawTitan, drawVortex, drawPhoenix, rockPos, VORTEX_PULL_RADIUS,
+} from './boss-art.js';
 import { UPGRADES, emptyLevels, upgradeDue, offerUpgrades } from './upgrades.js';
 import { todayUTC, dailySeed, dailyRecord, formatDay, gridText } from './daily.js';
 
@@ -739,27 +742,65 @@ function invasion() {
 // Jefe
 // ------------------------------------------------------------------
 const BOSS_NAMES = ['MOTHERSHIP', 'MOTHERSHIP MK II', 'MOTHERSHIP MK III'];
+// Un jefe por sector; después de los 5 vuelven, más rápidos (+1, +2…)
+const BOSS_ROTATION = ['mothership', 'magma', 'titan', 'vortex', 'phoenix'];
+const BOSS_COLORS = {
+  mothership: { glow: '255,59,92', bar: '#ff3b5c', label: '#ff8aa0', boom: ['#ff3b5c', '#ffd23f', '#fff'] },
+  magma: { glow: '255,140,26', bar: '#ff8c1a', label: '#ffb070', boom: ['#ff8c1a', '#ffd23f', '#ff3b3b'] },
+  titan: { glow: '217,160,102', bar: '#d9a066', label: '#e8c49a', boom: ['#d9a066', '#5dc1b9', '#fff'] },
+  vortex: { glow: '155,123,255', bar: '#9b7bff', label: '#c3b0ff', boom: ['#9b7bff', '#ff4fd8', '#fff'] },
+  phoenix: { glow: '255,176,32', bar: '#ffb020', label: '#ffd27a', boom: ['#ffb020', '#ff3b1f', '#fff2a8'] },
+};
 
 function createBoss() {
   const hp = 70 + wave * 10;
   const k = Math.floor(wave / SECTOR_LEN) - 1; // 0: oleada 5 · 1: oleada 10 · 2: oleada 15…
+  const tier = Math.floor(k / BOSS_ROTATION.length);
+  const kind = BOSS_ROTATION[k % BOSS_ROTATION.length];
+  const suffix = tier > 0 ? ' +' + tier : '';
   const base = {
     x: W / 2, y: -140, targetY: 120, hp, maxHp: hp, t: 0, atk: 2.4, pattern: 0, flash: 0,
     entering: true, dying: 0, burst: 0, burstTimer: 0, boomTimer: 0, dead: false,
+    kind, tier, level: k + 1, speedUp: Math.pow(0.88, tier), intangible: false,
   };
-  if (k === 1) {
+  if (kind === 'magma') {
     // MAGMA: medusa gigante de lava, jefa de la nebulosa
     boss = {
-      ...base, kind: 'magma', name: 'MAGMA', level: 2, w: 136, h: 80, targetY: 132,
-      tx: W / 2, wander: 2.5, blink: 0, moved: false, alpha: 1, intangible: false,
+      ...base, name: 'MAGMA' + suffix, w: 136, h: 80, targetY: 132,
+      tx: W / 2, wander: 2.5, blink: 0, moved: false, alpha: 1,
     };
-    return;
+  } else if (kind === 'titan') {
+    // TITÁN: núcleo de roca protegido por rocas que orbitan
+    boss = {
+      ...base, name: 'TITAN' + suffix, w: 92, h: 84, targetY: 140, mt: 0,
+      rocks: Array.from({ length: 8 }, (_, i) => newRock((i / 8) * TAU)), regrow: 7, spinBoost: 0, broken: 0,
+    };
+  } else if (kind === 'vortex') {
+    // VÓRTICE: se traga tus disparos y te los devuelve
+    boss = {
+      ...base, name: 'VORTEX' + suffix, w: 84, h: 84, targetY: 130, mt: 0,
+      absorbing: 0, absorbed: 0, totalAbsorbed: 0, spiral: 0, spiralTimer: 0, spiralAng: 0,
+    };
+  } else if (kind === 'phoenix') {
+    // FÉNIX SOLAR: pica hacia la nave y revive una vez a mitad de vida
+    boss = {
+      ...base, name: 'SOLAR PHOENIX' + suffix, w: 100, h: 80, targetY: 120, mt: 0,
+      mode: 'hover', modeT: 0, reborn: false, target: null, from: null, hitDone: false,
+    };
+  } else {
+    // Nave nodriza: nivel 2 suelta escoltas · nivel 3+ además dispara el rayo
+    const level = 1 + tier;
+    boss = {
+      ...base, w: INV_W * 3, h: INV_H * 3, level, escort: 4,
+      name: BOSS_NAMES[Math.min(level, 3) - 1] + (level > 3 ? ' +' + (level - 3) : ''),
+    };
   }
-  // Nave nodriza: nivel 2 suelta escoltas · nivel 3+ además dispara el rayo
-  const level = k <= 0 ? 1 : k;
-  boss = {
-    ...base, kind: 'mothership', w: INV_W * 3, h: INV_H * 3, level, escort: 4,
-    name: BOSS_NAMES[Math.min(level, 3) - 1] + (level > 3 ? ' +' + (level - 3) : ''),
+}
+
+function newRock(ang) {
+  return {
+    ang, r: rr('boss', 15, 21), verts: Array.from({ length: 8 }, () => rr('boss', 0.75, 1.15)),
+    rot: 0, hp: 3, flash: 0, dead: false,
   };
 }
 
@@ -772,14 +813,14 @@ function updateBoss(dt) {
     b.x += rand(-1, 1) * 2;
     if (b.boomTimer <= 0) {
       b.boomTimer = 0.07;
-      const colors = b.kind === 'magma' ? ['#ff8c1a', '#ffd23f', '#ff3b3b'] : ['#ff3b5c', '#ffd23f', '#fff'];
+      const colors = BOSS_COLORS[b.kind].boom;
       explode(b.x + rand(-b.w / 2, b.w / 2), b.y + rand(-b.h / 2, b.h / 2), pick(colors), 14, 200);
       Sound.explode();
       addShake(4);
     }
     if (b.dying <= 0) {
       b.dead = true;
-      explode(b.x, b.y, b.kind === 'magma' ? '#ff8c1a' : '#ff3b5c', 90, 480);
+      explode(b.x, b.y, BOSS_COLORS[b.kind].boom[0], 90, 480);
       explode(b.x, b.y, '#ffd23f', 50, 300);
       Sound.big(); addShake(16); flash(0.35);
       vibrate([200, 80, 200]);
@@ -799,6 +840,9 @@ function updateBoss(dt) {
   }
   const enraged = b.hp < b.maxHp * 0.5;
   if (b.kind === 'magma') { updateMagma(b, dt, enraged); return; }
+  if (b.kind === 'titan') { updateTitan(b, dt, enraged); return; }
+  if (b.kind === 'vortex') { updateVortex(b, dt, enraged); return; }
+  if (b.kind === 'phoenix') { updatePhoenix(b, dt, enraged || b.reborn); return; }
   b.t += dt * (enraged ? 1.4 : 1);
   b.x = W / 2 + Math.sin(b.t * 0.7) * (W / 2 - 110);
   b.y = b.targetY + Math.sin(b.t * 1.3) * 18;
@@ -869,7 +913,7 @@ function updateMagma(b, dt, enraged) {
 
   b.atk -= dt;
   if (b.atk <= 0 && b.blink <= 0) {
-    b.atk = enraged ? 1.5 : 2.2;
+    b.atk = (enraged ? 1.5 : 2.2) * b.speedUp;
     const p = b.pattern++ % 3;
     if (p === 0) {
       // Lluvia de lava
@@ -886,6 +930,226 @@ function updateMagma(b, dt, enraged) {
       Sound.warp();
     }
   }
+}
+
+// Ráfaga apuntada (la usan varios jefes)
+function updateBurst(b, dt) {
+  if (b.burst <= 0) return;
+  b.burstTimer -= dt;
+  if (b.burstTimer <= 0) {
+    b.burst--;
+    b.burstTimer = 0.09;
+    bossShot(b.x, b.y + b.h / 2, Math.atan2(player.y - b.y, player.x - b.x), 360);
+  }
+}
+
+// TITÁN: las rocas giran a su alrededor, se regeneran y las arroja
+function updateTitan(b, dt, enraged) {
+  b.t += dt;
+  b.mt += dt;
+  b.x = W / 2 + Math.sin(b.mt * 0.45) * (W / 2 - 170);
+  b.y = b.targetY + Math.sin(b.mt * 0.9) * 10;
+  b.spinBoost = Math.max(0, b.spinBoost - dt);
+  const spin = b.spinBoost > 0 ? 2.6 : enraged ? 1.4 : 0.9;
+  for (const r of b.rocks) {
+    r.ang += spin * dt;
+    r.rot += dt;
+    r.flash = Math.max(0, r.flash - dt);
+  }
+  b.regrow -= dt;
+  if (b.regrow <= 0) {
+    b.regrow = 7 * b.speedUp;
+    if (b.rocks.length < 8) b.rocks.push(newRock(rr('boss', 0, TAU)));
+  }
+  if (!player.alive) return;
+  b.atk -= dt;
+  if (b.atk <= 0) {
+    b.atk = (enraged ? 1.6 : 2.3) * b.speedUp;
+    const p = b.pattern++ % 3;
+    if (p === 0 && b.rocks.length) {
+      // Arroja rocas del escudo hacia la nave
+      for (let i = 0; i < (enraged ? 2 : 1) && b.rocks.length; i++) {
+        const rock = b.rocks.reduce((top, r) => (Math.sin(r.ang) > Math.sin(top.ang) ? r : top));
+        b.rocks = b.rocks.filter((r) => r !== rock);
+        const pos = rockPos(b, rock);
+        const a = Math.atan2(player.y - pos.y, player.x - pos.x);
+        enemyBullets.push({
+          x: pos.x - 13, y: pos.y - 13, w: 26, h: 26, vx: Math.cos(a) * 240, vy: Math.max(120, Math.sin(a) * 240),
+          kind: 'rock', hp: 3, r: rock.r, verts: rock.verts, rot: 0, flash: 0, dead: false,
+        });
+      }
+      Sound.rock();
+    } else if (p === 1) {
+      // Temblor: caen escombros desde arriba
+      const n = enraged ? 7 : 5;
+      for (let i = 0; i < n; i++) {
+        enemyBullets.push({
+          x: rr('boss', 40, W - 54), y: -20 - i * 30, w: 14, h: 14, vx: 0, vy: rr('boss', 220, 300),
+          kind: 'debris', r: 8, verts: [1, 0.8, 1.1, 0.9, 1, 0.85], rot: 0, flash: 0, dead: false,
+        });
+      }
+      addShake(4);
+      Sound.rock();
+    } else {
+      b.spinBoost = 3;
+    }
+  }
+}
+
+// VÓRTICE: absorbe (y te atrae), espiral de orbes y ráfagas
+function updateVortex(b, dt, enraged) {
+  b.mt += dt;
+  b.t += dt * (b.absorbing > 0 ? 3 : 1);
+  b.x = W / 2 + Math.sin(b.mt * 0.5) * (W / 2 - 190);
+  b.y = b.targetY + Math.sin(b.mt * 1.2) * 14;
+  b.intangible = b.absorbing > 0;
+  if (b.absorbing > 0) {
+    b.absorbing -= dt;
+    if (player.alive) {
+      const dx = b.x - player.x;
+      player.x = clamp(player.x + Math.sign(dx) * Math.min(Math.abs(dx), 70 * dt), player.w / 2 + 6, W - player.w / 2 - 6);
+    }
+    if (b.absorbing <= 0) {
+      // Devuelve lo que se tragó, en abanico hacia la nave
+      const n = clamp(b.absorbed + 4, 6, enraged ? 20 : 16);
+      const aim = Math.atan2(player.y - b.y, player.x - b.x);
+      for (let i = 0; i < n; i++) bossShot(b.x, b.y, aim - 0.6 + (1.2 * i) / (n - 1), 230);
+      b.absorbed = 0;
+      Sound.laserFire();
+    }
+  }
+  if (b.spiral > 0) {
+    b.spiral -= dt;
+    b.spiralTimer -= dt;
+    if (b.spiralTimer <= 0) {
+      b.spiralTimer = 0.07;
+      b.spiralAng += 0.5;
+      bossShot(b.x, b.y, b.spiralAng, 170);
+      if (enraged) bossShot(b.x, b.y, b.spiralAng + Math.PI, 170);
+    }
+  }
+  updateBurst(b, dt);
+  if (!player.alive) return;
+  b.atk -= dt;
+  if (b.atk <= 0 && b.absorbing <= 0 && b.spiral <= 0) {
+    b.atk = (enraged ? 1.8 : 2.6) * b.speedUp;
+    const p = b.pattern++ % 3;
+    if (p === 0) { b.absorbing = 2.6; b.absorbed = 0; Sound.warp(); }
+    else if (p === 1) { b.spiral = enraged ? 2.4 : 1.8; b.spiralTimer = 0; }
+    else { b.burst = enraged ? 8 : 5; b.burstTimer = 0; }
+  }
+}
+
+// Los disparos que pasan cerca del VÓRTICE cuando absorbe se curvan hacia él y desaparecen
+function vortexSuction(dt) {
+  if (!boss || boss.kind !== 'vortex' || boss.absorbing <= 0 || boss.entering || boss.dying > 0) return;
+  for (const b of bullets) {
+    const dx = boss.x - b.x, dy = boss.y - b.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (d < VORTEX_PULL_RADIUS) { b.vx += (dx / d) * 2400 * dt; b.vy += (dy / d) * 2400 * dt; }
+    if (d < 34) {
+      b.dead = true;
+      boss.absorbed++;
+      boss.totalAbsorbed++;
+      spawn({ x: b.x, y: b.y, vx: 0, vy: 0, life: 0.15, size: 16, color: '#9b7bff', type: 'flash', drag: 1 });
+    }
+  }
+}
+
+// FÉNIX SOLAR: vuela arriba, avisa con una mira y pica hacia la nave
+const PHOENIX_DIVE = 0.55, PHOENIX_RISE = 0.8, PHOENIX_EGG = 2.6;
+
+function updatePhoenix(b, dt, enraged) {
+  b.t += dt;
+  const hoverX = () => W / 2 + Math.sin(b.mt * 0.6) * (W / 2 - 150);
+  const hoverY = () => b.targetY + Math.sin(b.mt * 1.7) * 16;
+  if (b.mode === 'egg') {
+    b.modeT -= dt;
+    b.hp = Math.round(b.maxHp * 0.5 * (1 - Math.max(b.modeT, 0) / PHOENIX_EGG));
+    if (b.modeT <= 0) { b.mode = 'hover'; b.intangible = false; b.atk = 1; }
+    return;
+  }
+  if (b.mode === 'hover') {
+    b.mt += dt;
+    b.x = hoverX();
+    b.y = hoverY();
+  } else if (b.mode === 'telegraph') {
+    b.modeT -= dt;
+    if (b.modeT <= 0) { b.mode = 'dive'; b.modeT = PHOENIX_DIVE; b.from = { x: b.x, y: b.y }; b.hitDone = false; Sound.laserFire(); }
+  } else if (b.mode === 'dive' || b.mode === 'rise') {
+    b.modeT -= dt;
+    const dur = b.mode === 'dive' ? PHOENIX_DIVE : PHOENIX_RISE;
+    const p = 1 - Math.max(b.modeT, 0) / dur;
+    const e = b.mode === 'dive' ? p * p : 1 - (1 - p) * (1 - p);
+    const to = b.mode === 'dive' ? b.target : { x: hoverX(), y: hoverY() };
+    b.x = lerp(b.from.x, to.x, e);
+    b.y = lerp(b.from.y, to.y, e);
+    carveBunkers({ x: b.x - b.w / 2, y: b.y - b.h / 2, w: b.w, h: b.h });
+    spawn({ x: b.x + rand(-20, 20), y: b.y - 30, vx: rand(-40, 40), vy: rand(-120, -40), life: 0.4, size: 3, color: pick(['#ffb020', '#ff3b1f', '#fff2a8']), type: 'square' });
+    if (b.modeT <= 0) {
+      if (b.mode === 'dive') {
+        // Abajo de todo suelta un anillo de llamas y vuelve a subir
+        for (let i = 0; i < 8; i++) bossShot(b.x, b.y, Math.PI + (i / 7) * Math.PI, 200);
+        b.mode = 'rise'; b.modeT = PHOENIX_RISE; b.from = { x: b.x, y: b.y };
+      } else {
+        b.mode = 'hover';
+      }
+    }
+  }
+  updateBurst(b, dt);
+  if (!player.alive || b.mode !== 'hover') return;
+  b.atk -= dt;
+  if (b.atk <= 0) {
+    b.atk = (enraged ? 1.4 : 2.1) * b.speedUp;
+    const p = b.pattern++ % 3;
+    if (p === 0) {
+      b.mode = 'telegraph';
+      b.modeT = enraged ? 0.55 : 0.75;
+      b.target = { x: clamp(player.x, 60, W - 60), y: PLAYER_Y - 30 };
+      Sound.warning();
+    } else if (p === 1) {
+      // Plumas de fuego en abanico
+      const n = enraged ? 9 : 7;
+      const aim = Math.atan2(player.y - b.y, player.x - b.x);
+      for (let i = 0; i < n; i++) {
+        const a = aim - 0.5 + (1 / (n - 1)) * i;
+        enemyBullets.push({ x: b.x - 3, y: b.y + 30, w: 6, h: 14, vx: Math.cos(a) * 300, vy: Math.sin(a) * 300, kind: 'feather', dead: false });
+      }
+      Sound.enemyShoot();
+    } else {
+      updateBurstStart(b, enraged);
+    }
+  }
+}
+
+function updateBurstStart(b, enraged) {
+  b.burst = enraged ? 7 : 4;
+  b.burstTimer = 0;
+}
+
+// Daño a un jefe (disparos y ganchos de test). El fénix revive la primera vez.
+function damageBoss(n) {
+  boss.hp -= n;
+  boss.flash = 0.05;
+  if (boss.hp > 0) return;
+  if (boss.kind === 'phoenix' && !boss.reborn) {
+    boss.reborn = true;
+    boss.mode = 'egg';
+    boss.modeT = PHOENIX_EGG;
+    boss.intangible = true;
+    boss.hp = 0;
+    boss.name = boss.name.replace('SOLAR PHOENIX', 'PHOENIX REBORN');
+    enemyBullets.length = 0;
+    explode(boss.x, boss.y, '#ffb020', 70, 380);
+    flash(0.25);
+    Sound.big();
+    banner = { text: 'REBORN!', sub: 'THE PHOENIX RISES AGAIN', t: 1.8, color: '#ffb020' };
+    return;
+  }
+  boss.dying = 1.5;
+  boss.boomTimer = 0;
+  registerKill();
+  enemyBullets.length = 0;
 }
 
 function bossShot(x, y, a, sp) {
@@ -948,27 +1212,7 @@ function hitAsteroid(rect, byPlayer) {
 }
 
 function drawAsteroids() {
-  for (const a of asteroids) {
-    ctx.save();
-    ctx.translate(a.x, a.y);
-    ctx.rotate(a.rot);
-    ctx.beginPath();
-    a.verts.forEach((k, i) => {
-      const ang = (i / a.verts.length) * TAU;
-      const px = Math.cos(ang) * a.r * k, py = Math.sin(ang) * a.r * k;
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    });
-    ctx.closePath();
-    const g = ctx.createRadialGradient(-a.r * 0.3, -a.r * 0.3, 2, 0, 0, a.r * 1.1);
-    g.addColorStop(0, a.flash > 0 ? '#ffffff' : '#a8896b');
-    g.addColorStop(1, a.flash > 0 ? '#ffffff' : '#3b2a1f');
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,220,180,0.35)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.restore();
-  }
+  for (const a of asteroids) drawRock(ctx, a.x, a.y, a.r, a.verts, a.rot, a.flash > 0);
 }
 
 // ------------------------------------------------------------------
@@ -1435,7 +1679,8 @@ function collisions() {
   for (const b of bullets) {
     for (const e of enemyBullets) {
       if (!e.dead && e.kind !== 'orb' && e.kind !== 'lava' && overlap(b, e)) {
-        b.dead = true; e.dead = true;
+        b.dead = true;
+        if (e.hp > 1) { e.hp--; e.flash = 0.08; } else e.dead = true;
         explode(b.x, b.y, '#ffffff', 8, 120);
         break;
       }
@@ -1460,15 +1705,37 @@ function collisions() {
     }
     if (b.dead) continue;
 
+    // TITÁN: las rocas que orbitan frenan los disparos
+    if (boss && boss.kind === 'titan' && boss.dying <= 0 && !boss.entering) {
+      const rock = boss.rocks.find((r) => {
+        const pos = rockPos(boss, r);
+        return overlap(b, { x: pos.x - r.r * 0.8, y: pos.y - r.r * 0.8, w: r.r * 1.6, h: r.r * 1.6 });
+      });
+      if (rock) {
+        b.dead = true; stats.hits++;
+        rock.hp--; rock.flash = 0.08;
+        if (rock.hp <= 0) {
+          const pos = rockPos(boss, rock);
+          boss.rocks = boss.rocks.filter((r) => r !== rock);
+          boss.broken++;
+          explode(pos.x, pos.y, '#d9a066', 16, 160);
+          Sound.rock();
+          addScore(100);
+          floatText(pos.x, pos.y, '100', '#d9a066', 10);
+        }
+        continue;
+      }
+    }
+
     if (boss && boss.dying <= 0 && !boss.entering && !boss.intangible) {
       const bb = { x: boss.x - boss.w / 2, y: boss.y - boss.h / 2, w: boss.w, h: boss.h };
       if (overlap(b, bb)) {
         b.dead = true; stats.hits++;
-        boss.hp--; boss.flash = 0.05;
         addScore(10);
         Sound.bossHit();
-        for (let i = 0; i < 4; i++) spawn({ x: b.x, y: b.y, vx: rand(-160, 160), vy: rand(-60, 160), life: 0.3, size: 2, color: '#ff3b5c', type: 'spark' });
-        if (boss.hp <= 0) { boss.dying = 1.5; boss.boomTimer = 0; registerKill(); enemyBullets.length = 0; }
+        const spark = BOSS_COLORS[boss.kind].bar;
+        for (let i = 0; i < 4; i++) spawn({ x: b.x, y: b.y, vx: rand(-160, 160), vy: rand(-60, 160), life: 0.3, size: 2, color: spark, type: 'spark' });
+        damageBoss(1);
         continue;
       }
     }
@@ -1491,8 +1758,16 @@ function collisions() {
   for (const e of enemyBullets) {
     if (e.dead) continue;
     if (hitAsteroid(e, false)) { e.dead = true; continue; }
-    if (hitBunkers(e, true, e.kind === 'lava' ? 3.6 : 2.6)) { e.dead = true; continue; }
+    if (hitBunkers(e, true, { lava: 3.6, rock: 4.2, debris: 3 }[e.kind] || 2.6)) { e.dead = true; continue; }
     if (player.alive && overlap(e, pb)) { e.dead = true; hitPlayer(); }
+  }
+
+  // FÉNIX en picada: chocarlo duele
+  if (boss && boss.kind === 'phoenix' && (boss.mode === 'dive' || boss.mode === 'rise') && !boss.hitDone && player.alive) {
+    if (overlap({ x: boss.x - boss.w * 0.35, y: boss.y - boss.h * 0.4, w: boss.w * 0.7, h: boss.h * 0.8 }, pb)) {
+      boss.hitDone = true;
+      hitPlayer();
+    }
   }
 
   // Invasores en picada vs jugador
@@ -1533,6 +1808,8 @@ function update(dt) {
   for (const e of enemyBullets) {
     if (pull) e.vx += (W / 2 - e.x) * pull * dt;
     e.x += e.vx * dt; e.y += e.vy * dt;
+    if (e.verts) e.rot += dt * 3;
+    if (e.flash) e.flash = Math.max(0, e.flash - dt);
     if (e.y > H + 20 || e.y < -40 || e.x < -40 || e.x > W + 40) e.dead = true;
   }
   for (const p of powerups) {
@@ -1554,6 +1831,7 @@ function update(dt) {
   if (state !== 'playing') return;
   updateLasers(dt);
   updateHazards(dt);
+  vortexSuction(dt);
   updateUfo(dt);
   collisions();
 
@@ -1709,59 +1987,10 @@ function drawPlayer() {
   }
 }
 
-// Medusa de lava (MAGMA y sus crías): campana con brillo, ojos y tentáculos
-function drawJelly(cx, cy, r, t, { alpha = 1, flashOn = false, tentacles = 7 } = {}) {
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.lineCap = 'round';
-  for (let i = 0; i < tentacles; i++) {
-    const fx = cx - r * 0.7 + (tentacles > 1 ? (i / (tentacles - 1)) * r * 1.4 : r * 0.7);
-    const len = r * (0.9 + 0.25 * Math.sin(t * 2 + i));
-    ctx.strokeStyle = flashOn ? '#ffffff' : i % 2 ? '#ff5a1f' : '#ff8c1a';
-    ctx.lineWidth = Math.max(2, r * 0.09);
-    ctx.beginPath();
-    ctx.moveTo(fx, cy + r * 0.05);
-    for (let k = 1; k <= 6; k++) {
-      const f = k / 6;
-      ctx.lineTo(fx + Math.sin(t * 3 + i * 0.9 + k * 0.7) * r * 0.14 * f, cy + f * len);
-    }
-    ctx.stroke();
-  }
-  const pulse = 1 + Math.sin(t * 2.4) * 0.04;
-  const g = ctx.createRadialGradient(cx, cy - r * 0.4, r * 0.1, cx, cy - r * 0.1, r * 1.05);
-  g.addColorStop(0, flashOn ? '#ffffff' : '#fff2a8');
-  g.addColorStop(0.35, flashOn ? '#ffffff' : '#ffb020');
-  g.addColorStop(0.75, '#ff5a1f');
-  g.addColorStop(1, '#9e1b0c');
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, r * pulse, r * 0.78 * pulse, 0, Math.PI, TAU);
-  const scallops = 7;
-  for (let i = 0; i <= scallops; i++) {
-    ctx.lineTo(cx + r * pulse - (i / scallops) * 2 * r * pulse, cy + (i % 2 ? r * 0.12 : 0));
-  }
-  ctx.closePath();
-  ctx.fill();
-  // Ojos
-  ctx.fillStyle = '#2a0500';
-  for (const side of [-1, 1]) {
-    ctx.beginPath();
-    ctx.ellipse(cx + side * r * 0.28, cy - r * 0.3, r * 0.11, r * 0.16, 0, 0, TAU);
-    ctx.fill();
-  }
-  ctx.fillStyle = '#fff3c4';
-  for (const side of [-1, 1]) {
-    ctx.beginPath();
-    ctx.arc(cx + side * r * 0.26, cy - r * 0.35, r * 0.04, 0, TAU);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
 function drawInvaders() {
   for (const inv of invaders) {
     if (inv.kind === 'magmita') {
-      drawJelly(inv.x + inv.w / 2, inv.y + inv.h * 0.45, 14, time * 1.5 + inv.wob, { flashOn: inv.flash > 0, tentacles: 3 });
+      drawJelly(ctx, inv.x + inv.w / 2, inv.y + inv.h * 0.45, 14, time * 1.5 + inv.wob, { flashOn: inv.flash > 0, tentacles: 3 });
       continue;
     }
     const spr = inv.flash > 0 ? SPR.invFlash : SPR.inv[inv.type];
@@ -1780,20 +2009,22 @@ function drawInvaders() {
 function drawBoss() {
   if (!boss) return;
   const b = boss;
-  const magma = b.kind === 'magma';
-  const glow = magma ? '255,140,26' : '255,59,92';
+  const c = BOSS_COLORS[b.kind];
+  const enraged = b.hp < b.maxHp * 0.5;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = magma ? b.alpha : 1;
+  ctx.globalAlpha = b.kind === 'magma' ? b.alpha : 1;
   const g = ctx.createRadialGradient(b.x, b.y, 10, b.x, b.y, b.w);
-  g.addColorStop(0, `rgba(${glow},0.35)`);
-  g.addColorStop(1, `rgba(${glow},0)`);
+  g.addColorStop(0, `rgba(${c.glow},0.35)`);
+  g.addColorStop(1, `rgba(${c.glow},0)`);
   ctx.fillStyle = g;
   ctx.fillRect(b.x - b.w, b.y - b.w, b.w * 2, b.w * 2);
   ctx.restore();
-  if (magma) {
-    drawJelly(b.x, b.y + 22, 75, b.t, { alpha: b.alpha, flashOn: b.flash > 0, tentacles: 7 });
-  } else {
+  if (b.kind === 'magma') drawJelly(ctx, b.x, b.y + 22, 75, b.t, { alpha: b.alpha, flashOn: b.flash > 0, tentacles: 7 });
+  else if (b.kind === 'titan') drawTitan(ctx, b, b.t, enraged);
+  else if (b.kind === 'vortex') drawVortex(ctx, b, b.t);
+  else if (b.kind === 'phoenix') drawPhoenix(ctx, b, b.t);
+  else {
     const spr = b.flash > 0 ? SPR.bossFlash : SPR.boss;
     if (spr) ctx.drawImage(spr, b.x - b.w / 2, b.y - b.h / 2, b.w, b.h);
   }
@@ -1803,9 +2034,9 @@ function drawBoss() {
   const bw = 420, bx = (W - bw) / 2, by = 62;
   ctx.fillStyle = 'rgba(255,255,255,0.12)';
   ctx.fillRect(bx, by, bw, 8);
-  ctx.fillStyle = b.hp < b.maxHp * 0.5 ? '#ffd23f' : magma ? '#ff8c1a' : '#ff3b5c';
+  ctx.fillStyle = enraged ? '#ffd23f' : c.bar;
   ctx.fillRect(bx, by, (bw * Math.max(0, b.hp)) / b.maxHp, 8);
-  drawText(b.name, W / 2, by - 10, { size: 8, color: magma ? '#ffb070' : '#ff8aa0' });
+  drawText(b.name, W / 2, by - 10, { size: 8, color: c.label });
 }
 
 function drawUfo() {
@@ -1829,6 +2060,12 @@ function drawUfo() {
   ctx.restore();
 }
 
+function drawRockBullets() {
+  for (const e of enemyBullets) {
+    if (e.kind === 'rock' || e.kind === 'debris') drawRock(ctx, e.x + e.w / 2, e.y + e.h / 2, e.r, e.verts, e.rot, e.flash > 0);
+  }
+}
+
 function drawBullets() {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -1839,6 +2076,16 @@ function drawBullets() {
     ctx.fillRect(b.x, b.y, b.w, b.h);
   }
   for (const e of enemyBullets) {
+    if (e.kind === 'rock' || e.kind === 'debris') continue;
+    if (e.kind === 'feather') {
+      ctx.strokeStyle = '#ffb020';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(e.x + 3, e.y + 7);
+      ctx.lineTo(e.x + 3 - e.vx * 0.04, e.y + 7 - e.vy * 0.04);
+      ctx.stroke();
+      continue;
+    }
     if (e.kind === 'lava') {
       ctx.fillStyle = 'rgba(255,120,20,0.35)';
       ctx.beginPath(); ctx.arc(e.x + 5, e.y + 5, 10, 0, TAU); ctx.fill();
@@ -1943,6 +2190,7 @@ function drawWorld() {
   drawBoss();
   drawUfo();
   drawPowerups();
+  drawRockBullets();
   drawBullets();
   drawLasers();
   drawPlayer();
@@ -2188,7 +2436,17 @@ if (TEST_MODE) {
     get asteroidCount() { return asteroids.filter((a) => !a.dead).length; },
     get lavaCount() { return enemyBullets.filter((e) => e.kind === 'lava').length; },
     get bulletXs() { return bullets.map((b) => Math.round(b.x)); },
-    get bossState() { return boss ? { x: boss.x, intangible: !!boss.intangible, blink: boss.blink || 0 } : null; },
+    get bossState() {
+      if (!boss) return null;
+      return {
+        x: boss.x, hp: boss.hp, maxHp: boss.maxHp, intangible: !!boss.intangible, blink: boss.blink || 0,
+        rocks: boss.rocks ? boss.rocks.length : 0, broken: boss.broken || 0,
+        absorbing: boss.absorbing || 0, absorbed: boss.totalAbsorbed || 0,
+        mode: boss.mode || null, reborn: !!boss.reborn, entering: boss.entering, dying: boss.dying,
+      };
+    },
+    get bulletKinds() { return enemyBullets.reduce((acc, e) => ((acc[e.kind] = (acc[e.kind] || 0) + 1), acc), {}); },
+    damageBoss(n) { cheated = true; if (boss && !boss.intangible && boss.dying <= 0) damageBoss(n); },
     spawnAsteroidAt(x, y) { cheated = true; spawnAsteroid(x, y, 0); asteroids[asteroids.length - 1].vx = 0; },
     hazardNow() { hazardTimer = 0; if (F) F.magmaTimer = 0; },
     killKind(kind) {
