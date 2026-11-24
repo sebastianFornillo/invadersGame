@@ -27,6 +27,16 @@ const usedImages = [...new Set([...code.matchAll(/img\/[\w.-]+\.(?:png|jpe?g|gif
 mkdirSync(join(dist, 'img'), { recursive: true });
 for (const img of usedImages) cpSync(join(root, img), join(dist, img));
 
+// Build de tests: sin ranking real, para que los tests nunca escriban en la
+// base de producción (los tests del ranking usan una API simulada o la base de la CI).
+const testBuild = process.env.INVADERS_TEST_BUILD === '1';
+if (testBuild) {
+  writeFileSync(
+    join(dist, 'src', 'config.js'),
+    "// Build de tests: ranking desactivado\nexport const CONFIG = { supabaseUrl: '', supabaseKey: '' };\n",
+  );
+}
+
 // Dominio de producción en Vercel → links absolutos de la vista previa
 const prodHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
 if (prodHost) {
@@ -49,5 +59,6 @@ if (missing.length) {
 
 console.log(
   `dist/ listo: ${FILES.length} archivos, ${DIRS.join(', ')}, ${usedImages.length} imágenes` +
-    (prodHost ? ` · vista previa → https://${prodHost}/` : ''),
+    (prodHost ? ` · vista previa → https://${prodHost}/` : '') +
+    (testBuild ? ' · build de tests (sin ranking real)' : ''),
 );

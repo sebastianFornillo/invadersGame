@@ -10,6 +10,6 @@
 // NUNCA pongas acá la secret key (sb_secret_...) ni la service_role:
 // el juego la detecta y desactiva el ranking.
 export const CONFIG = {
-  supabaseUrl: '',
-  supabaseKey: '',
+  supabaseUrl: 'https://itrjwhhaspmhebjjhyef.supabase.co',
+  supabaseKey: 'sb_publishable_cW4WDc5DqE8t_8cLBK_9Hw_CH2nlhYo',
 };
