@@ -1,26 +1,35 @@
-<style>
-    body {
-        margin :0 ;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        background-image: url(./img/startScreenBackground.png);
-        background-position: center;
-        background-repeat: no-repeat;
-        background-size:  70% 86%; 
-         background-color: black;         
-    }
-    
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#05010f">
+    <title>Invaders Space</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <main class="stage">
+        <canvas id="game" aria-label="Invaders Space"></canvas>
+    </main>
 
-</style>
+    <div class="hud-buttons">
+        <button id="muteBtn" aria-label="Silenciar">♪</button>
+        <button id="pauseBtn" aria-label="Pausa">II</button>
+    </div>
 
-<div class="di" style ="position: relative; ">
-    <p class="point" style = "font-size: 14px ;position : absolute ; z-index: 10; color: white ; left: 15px; top: 15px; margin: 0; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-        <span>Score:</span>
-        <span id="scoreElement" style=" color: whitesmoke ; font-weight: 700;"> 0</span></p>
-    <canvas style="border-radius: 30px;"></canvas>
-    
-   
-</div>
+    <div id="touch" class="touch" aria-hidden="true">
+        <div class="tpad">
+            <button data-k="left">◀</button>
+            <button data-k="right">▶</button>
+        </div>
+        <button class="tfire" data-k="fire">FIRE</button>
+    </div>
 
-<script src="index.js"></script>
+    <p class="rotate-hint">Girá el teléfono para jugar ↻</p>
+
+    <script src="game.js"></script>
+</body>
+</html>
