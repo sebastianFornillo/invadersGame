@@ -4,6 +4,9 @@
   "private": true,
   "description": "Shooter arcade retro inspirado en Space Invaders, en JavaScript puro.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "python3 -m http.server 4173 --bind 127.0.0.1",
     "build": "node scripts/build.mjs",
