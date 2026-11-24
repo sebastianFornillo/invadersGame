@@ -2,7 +2,7 @@
 
 Shooter arcade inspirado en Space Invaders, en JavaScript puro: sin frameworks ni paso de build.
 
-**Jugar:** https://sebastianfornillo.github.io/invadersGame/ (con GitHub Pages activado sobre `main`).
+**Jugar:** en el deploy de Vercel del repo, o en https://sebastianfornillo.github.io/invadersGame/ si GitHub Pages está activado.
 
 ## Controles
 | Acción | Teclado | Mando | Táctil |
@@ -25,16 +25,24 @@ Requisitos: Node 20+ y Python 3 (para el servidor local).
 
 ```bash
 npm install
-npm start          # http://127.0.0.1:4173
+npm start          # desarrollo: sirve la raíz en http://127.0.0.1:4173
+npm run build      # arma dist/ con sólo lo que se publica
+npm run preview    # build + sirve dist/ (igual que producción)
 npm run lint       # ESLint
-npm test           # tests en navegador real (Playwright): escritorio, celular y PWA
+npm test           # tests en navegador real (Playwright) contra dist/: escritorio, celular y PWA
 ```
+
+### Deploy
+- **Vercel** (recomendado): `vercel.json` ya lo configura como sitio estático (`npm run build` → `dist/`). Cada PR genera una URL de prueba y `main` se publica solo. La vista previa para WhatsApp toma el dominio de producción automáticamente.
+- **GitHub Pages**: también funciona sin build, sirviendo la raíz de `main`.
 
 > El juego usa módulos ES y service worker, así que hay que abrirlo con un servidor (no con doble clic en `index.html`).
 
 ### Estructura
 ```
 index.html            página y meta tags (PWA, vista previa)
+vercel.json           deploy estático en Vercel
+scripts/build.mjs     arma dist/ y valida los archivos offline
 styles.css            estilos y controles táctiles
 sw.js                 service worker (modo offline)
 manifest.webmanifest  datos de la app instalable

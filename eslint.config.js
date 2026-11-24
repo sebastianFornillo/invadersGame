@@ -3,7 +3,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['node_modules/', 'playwright-report/', 'test-results/'],
+    ignores: ['node_modules/', 'playwright-report/', 'test-results/', 'dist/'],
   },
   js.configs.recommended,
   {
@@ -23,7 +23,7 @@ export default [
     languageOptions: { sourceType: 'script', globals: { ...globals.serviceworker } },
   },
   {
-    files: ['tests/**/*.js', 'playwright.config.js', 'eslint.config.js'],
+    files: ['tests/**/*.js', 'scripts/**/*.mjs', 'playwright.config.js', 'eslint.config.js'],
     languageOptions: {
       sourceType: 'module',
       globals: { ...globals.node, ...globals.browser },
