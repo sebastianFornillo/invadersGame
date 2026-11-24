@@ -190,7 +190,7 @@ html, body {
     gap: 8px;
     margin: 10px 0 4px;
 }
-.panel input {
+.panel input:not([type]) {
     flex: 1;
     min-width: 0;
     height: 44px;
@@ -203,7 +203,7 @@ html, body {
     font-size: 16px; /* evita el zoom automático en iPhone */
     text-transform: uppercase;
 }
-.panel input:focus { outline: none; border-color: #5dc1b9; box-shadow: 0 0 0 3px rgba(93, 193, 185, 0.25); }
+.panel input:not([type]):focus { outline: none; border-color: #5dc1b9; box-shadow: 0 0 0 3px rgba(93, 193, 185, 0.25); }
 .btn {
     min-height: 44px;
     padding: 0 16px;
@@ -292,3 +292,109 @@ html, body {
     @keyframes panel-in { from { transform: translateY(8px) scale(0.98); opacity: 0; } }
 }
 .panel .grid { font-size: 22px; letter-spacing: 2px; line-height: 1.4; margin: 8px 0; overflow-wrap: anywhere; }
+
+/* Opciones */
+.opts { display: grid; gap: 6px; text-align: left; }
+.opt {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    cursor: pointer;
+}
+.opt b { display: block; font-weight: normal; font-size: 10px; }
+.opt small { display: block; margin-top: 4px; color: #8a86b8; font-size: 8px; line-height: 1.5; }
+.opt input[type="checkbox"] {
+    appearance: none;
+    position: relative;
+    flex: none;
+    width: 44px;
+    height: 24px;
+    margin: 0;
+    border-radius: 12px;
+    background: #2a2650;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.opt input[type="checkbox"]::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #8a86b8;
+    transition: transform 0.15s, background 0.15s;
+}
+.opt input[type="checkbox"]:checked { background: #5dc1b9; }
+.opt input[type="checkbox"]:checked::after { transform: translateX(20px); background: #05010f; }
+.opt input:focus-visible { outline: 3px solid #ffd23f; outline-offset: 2px; }
+.range { display: flex; align-items: center; gap: 10px; }
+.range input[type="range"] { width: 130px; accent-color: #5dc1b9; }
+.range output { width: 4ch; color: #5dc1b9; font-size: 10px; text-align: right; }
+
+/* Controles táctiles: grandes y modo zurdo */
+.touch.left { flex-direction: row-reverse; }
+.touch.big .tpad button { width: 88px; height: 88px; font-size: 24px; }
+.touch.big .tfire { width: 116px; height: 116px; font-size: 14px; }
+
+/* Elegir mejora */
+.panel.wide { width: min(660px, 100%); }
+.panel header.center { justify-content: center; }
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+.card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    min-height: 150px;
+    padding: 18px 10px 12px;
+    border: 2px solid rgba(93, 193, 185, 0.45);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    color: #fff;
+    font: inherit;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.12s, border-color 0.12s, background 0.12s;
+}
+.card:not(:disabled):hover,
+.card:focus-visible {
+    border-color: #ffd23f;
+    background: rgba(255, 210, 63, 0.08);
+    outline: none;
+    transform: translateY(-2px);
+}
+.card:disabled { opacity: 0.55; cursor: default; }
+.card .icon { font-size: 30px; line-height: 1; }
+.card b { font-weight: normal; font-size: 10px; color: #ffd23f; }
+.card small { color: #8a86b8; font-size: 8px; line-height: 1.6; }
+.card .lvl { font-size: 7px; color: #5dc1b9; }
+.card .key { position: absolute; top: 6px; left: 8px; font-size: 8px; color: #5a5688; }
+@media (max-height: 430px) {
+    .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { min-height: 120px; padding: 14px 6px 10px; }
+    .card .icon { font-size: 24px; }
+}
+
+/* Celular horizontal: opciones en dos columnas para no tener que desplazar */
+@media (max-height: 430px) {
+    .panel { padding: 10px 14px 12px; }
+    .panel header { margin-bottom: 6px; }
+    .panel footer { margin-top: 8px; }
+    .panel.options .opt { min-height: 40px; padding: 5px 10px; }
+    .panel.options { width: min(760px, 100%); }
+    .panel.options .opts { grid-template-columns: 1fr 1fr; }
+    .panel.options .opt:first-child { grid-column: 1 / -1; }
+}

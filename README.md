@@ -11,6 +11,8 @@ Shooter arcade inspirado en Space Invaders, en JavaScript puro: sin frameworks n
 | Disparar (mantener) | Espacio / ↑ / W | A / RT | FIRE |
 | Pausa | P / Esc | Start | II |
 | Sonido | M | — | ♪ |
+| Opciones | O | — | ⚙ |
+| Ranking online | R | — | 🏆 |
 
 ## Qué tiene
 - Oleadas infinitas con dificultad progresiva, invasores en picada y blindados
@@ -18,6 +20,11 @@ Shooter arcade inspirado en Space Invaders, en JavaScript puro: sin frameworks n
 - Combos hasta x5, vida extra cada 25.000 puntos, top 5 local
 - Sonido sintetizado (WebAudio), partículas, efecto CRT
 - **Desafío diario:** las mismas oleadas para todos cada día (azar con semilla), un intento oficial, resultado para compartir con emojis y ranking de HOY
+- **Mejoras entre oleadas:** después de las oleadas pares y de cada jefe se elige 1 de 3 (cadencia, cañón doble, perforante, motores, imán, escudo automático, power-ups largos, vida extra)
+- **Enemigos nuevos:** divisores que se parten en dos (oleada 6+) e invasores láser con aviso previo (oleada 8+); los búnkers frenan el rayo mientras aguantan
+- **Jefes por niveles:** desde la oleada 10 sueltan escoltas y desde la 15 también disparan el rayo
+- **Opciones:** volumen, temblor, destellos, efecto TV, vibración, botones táctiles grandes y modo zurdo (respeta "reducir movimiento" del sistema)
+- **Mando:** también navega todas las pantallas (cruz o stick, A elige, B vuelve)
 - **App instalable (PWA):** se agrega a la pantalla de inicio y funciona sin internet
 - Vibración en Android, pantalla completa, vista previa al compartir el link
 
@@ -74,6 +81,8 @@ src/online.js         cliente del ranking (fetch a las funciones RPC)
 src/ui.js             pantallas de ranking, ligas y guardar puntaje
 src/rng.js            azar con semilla (una corriente por sistema)
 src/daily.js          desafío diario: día UTC, intento, texto para compartir
+src/upgrades.js       mejoras entre oleadas (datos y ofertas)
+src/settings.js       opciones del jugador
 supabase/schema.sql   tablas, seguridad y funciones del ranking
 tests/                tests de Playwright
 ```
