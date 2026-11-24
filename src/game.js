@@ -45,8 +45,9 @@ const INV_TYPES = [
   { color: '#ff9f1c', points: 150, hp: 1, kind: 'splitter' }, // se parte en dos al morir (oleada 6+)
   { color: '#ff3b3b', points: 400, hp: 2, kind: 'laser' },    // dispara un rayo (oleada 8+)
   { color: '#ffe066', points: 50, hp: 1, kind: 'mini' },      // los que salen del divisor
+  { color: '#ff8c1a', points: 80, hp: 2, kind: 'magmita' },   // crías de MAGMA (sector 2)
 ];
-const T_SPLITTER = 3, T_LASER = 4, T_MINI = 5;
+const T_SPLITTER = 3, T_LASER = 4, T_MINI = 5, T_MAGMITA = 6;
 const MINI_W = 19, MINI_H = 24;
 
 const POWERS = {
@@ -67,7 +68,21 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // Azar de la jugabilidad, con semilla (el desafío diario es igual para todos).
 // Los efectos visuales siguen usando Math.random.
-const STREAMS = ['fire', 'dive', 'ufo', 'drop', 'bunker', 'upgrade'];
+const STREAMS = ['fire', 'dive', 'ufo', 'drop', 'bunker', 'upgrade', 'hazard', 'boss'];
+
+// ------------------------------------------------------------------
+// Sectores: cada 5 oleadas cambia el escenario y aparece un peligro nuevo
+// ------------------------------------------------------------------
+const SECTORS = [
+  { name: 'EARTH ORBIT', color: '#5dc1b9', bg: ['#05010f', '#0a0620', '#130a2e'] },
+  { name: 'NEBULA', color: '#ff4fd8', bg: ['#0c0219', '#1b0631', '#2b0a3d'] },
+  { name: 'ASTEROID BELT', color: '#d9a066', bg: ['#060407', '#120c10', '#1f140e'] },
+  { name: 'BLACK HOLE', color: '#9b7bff', bg: ['#000000', '#04020a', '#0a0517'] },
+  { name: 'SOLAR CORONA', color: '#ffb020', bg: ['#120302', '#260805', '#3f1206'] },
+];
+const SECTOR_LEN = 5;
+const sectorOf = (w) => Math.min(Math.floor((w - 1) / SECTOR_LEN), SECTORS.length - 1);
+const GRAVITY = 0.8; // agujero negro: tirón horizontal hacia el centro
 let R = createStreams(randomSeed(), STREAMS);
 const rr = (stream, a, b) => a + R[stream]() * (b - a);
 const rpick = (stream, arr) => arr[Math.floor(R[stream]() * arr.length)];
@@ -308,6 +323,8 @@ let runId = null, runToken = 0, cheated = false;
 let mode = 'classic', practice = false, dailyDay = null, waveLog = [], menuSel = 0;
 // Mejoras elegidas en esta partida y rayos láser activos
 let upgrades = emptyLevels(), lasers = [];
+// Sector actual, salto al hiperespacio y peligros del escenario
+let sector = 0, warp = 0, asteroids = [], hazardTimer = 0;
 
 // Link directo al desafío: ?modo=diario abre el menú con esa opción elegida
 {
@@ -348,6 +365,7 @@ function newGame({ mode: m = 'classic', day = null, practice: p = false } = {}) 
   waveLog = [];
   upgrades = emptyLevels();
   lasers = [];
+  sector = 0; warp = 0; asteroids = []; hazardTimer = 0;
   score = 0; wave = 0; lives = 3; nextLife = EXTRA_LIFE_EVERY;
   combo = 0; comboTimer = 0; maxCombo = 0; newRecord = false;
   stats = { shots: 0, hits: 0, kills: 0 };
@@ -386,18 +404,28 @@ function startWave(n) {
   waveHits = 0;
   clearTimer = 0;
   lasers.length = 0;
+  asteroids.length = 0;
+  hazardTimer = 3;
   buildBunkers();
   if (upgrades.regen && player.alive && !player.shield) {
     player.shield = true;
     floatText(player.x, player.y - 46, 'SHIELD', POWERS.S.color, 10);
   }
+  // ¿Sector nuevo? Salto al hiperespacio y cartel con el nombre del escenario
+  const next = sectorOf(n);
+  const sectorStart = n === 1 || next !== sector;
+  if (next !== sector) { warp = 1.8; Sound.warp(); }
+  sector = next;
+  const sc = SECTORS[sector];
   if (cfg.boss) {
     createBoss();
-    banner = { text: 'WARNING', sub: 'MOTHERSHIP APPROACHING', t: 2.6, color: '#ff3b5c' };
+    banner = { text: 'WARNING', sub: boss.name + ' APPROACHING', t: 2.6, color: '#ff3b5c' };
     Sound.warning();
   } else {
     createFormation();
-    banner = { text: 'WAVE ' + n, sub: n === 1 ? 'DEFEND THE EARTH' : '', t: 2.2, color: '#5dc1b9' };
+    banner = sectorStart
+      ? { text: 'SECTOR ' + (sector + 1), sub: sc.name + ' · WAVE ' + n, t: 2.6, color: sc.color }
+      : { text: 'WAVE ' + n, sub: '', t: 2.2, color: sc.color };
   }
 }
 
@@ -412,7 +440,7 @@ function createFormation() {
     targetY: 64,
     entering: true,
     dir: 1, drop: 0, total: rows * cols,
-    fireTimer: 1.5, diveTimer: cfg.diveInterval, laserTimer: 3,
+    fireTimer: 1.5, diveTimer: cfg.diveInterval, laserTimer: 3, magmaTimer: 4,
   };
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -478,6 +506,15 @@ function updateFormation(dt) {
     }
   }
 
+  // Nebulosa: bajan magmitas flotando desde arriba
+  if (sector === 1) {
+    F.magmaTimer -= dt;
+    if (F.magmaTimer <= 0) {
+      F.magmaTimer = rr('hazard', 6, 10);
+      spawnMagmitas(rr('hazard', 120, W - 120), -36, R.hazard() < 0.4 ? 2 : 1);
+    }
+  }
+
   // Disparo: sólo el invasor más bajo de cada columna puede disparar
   F.fireTimer -= dt;
   if (F.fireTimer <= 0) {
@@ -514,6 +551,7 @@ function updateFormation(dt) {
 // Mueve un invasor según su estado. Devuelve true si la formación llegó abajo.
 function moveInvader(inv, dt) {
   inv.flash = Math.max(0, inv.flash - dt);
+  if (inv.kind === 'magmita') return moveMagmita(inv, dt);
   if (inv.state === 'formation') {
     const s = slotOf(inv);
     inv.x = s.x; inv.y = s.y;
@@ -556,14 +594,51 @@ function spawnMinis(x, y, n = 2) {
   }
 }
 
+// Magmitas: crías de MAGMA que bajan flotando, sueltan una gota de lava y derriten búnkers
+function spawnMagmitas(x, y, n = 2) {
+  for (let i = 0; i < n; i++) {
+    invaders.push({
+      type: T_MAGMITA, kind: 'magmita', hp: INV_TYPES[T_MAGMITA].hp,
+      x: clamp(x - 14 + (i - (n - 1) / 2) * 42, 4, W - 32), y,
+      w: 28, h: 30, state: 'dive', t: i * 0.4, flash: 0, dead: false, shot: false,
+      speed: 70 + Math.min(wave, 30) * 2, wob: i % 2 ? 1 : -1,
+    });
+  }
+}
+
+function moveMagmita(inv, dt) {
+  inv.t += dt;
+  inv.y += inv.speed * dt;
+  inv.x += (Math.cos(inv.t * 2) * 80 * inv.wob + (player.x - inv.x - inv.w / 2) * 0.3) * dt;
+  inv.x = clamp(inv.x, 4, W - inv.w - 4);
+  if (!inv.shot && inv.t > 1.1 && inv.y > 40 && inv.y < PLAYER_Y - 140) {
+    inv.shot = true;
+    dropLava(inv.x + inv.w / 2, inv.y + inv.h, 0, 200);
+  }
+  if (inv.y > H + 20) inv.dead = true;
+  carveBunkers(inv);
+  return false;
+}
+
+// Gota de lava: no se puede anular a tiros y derrite más búnker
+function dropLava(x, y, vx, vy) {
+  enemyBullets.push({ x: x - 5, y: y - 5, w: 10, h: 10, vx, vy, kind: 'lava', dead: false });
+}
+
 // ------------------------------------------------------------------
-// Rayos láser (invasor láser y jefe nivel 3+)
+// Rayos: invasor láser, jefe nivel 3+ y erupciones solares
 // ------------------------------------------------------------------
-function startLaser({ owner, x, y }) {
+const LASER_KINDS = {
+  laser: { w: 16, charge: 0.85, fire: 0.45, glow: 'rgba(255,59,59,0.25)', mid: 'rgba(255,80,80,0.75)', core: '#ffffff', warn: 'rgba(255,59,59,0.55)', spark: '#ff6b6b' },
+  flare: { w: 26, charge: 1.1, fire: 0.6, glow: 'rgba(255,176,32,0.25)', mid: 'rgba(255,140,26,0.8)', core: '#fff6d0', warn: 'rgba(255,176,32,0.6)', spark: '#ffb020' },
+};
+
+function startLaser({ owner, x, y, kind = 'laser' }) {
+  const k = LASER_KINDS[kind];
   const follow = !!owner && owner !== boss;
   lasers.push({
-    owner, follow, x: follow ? owner.x + owner.w / 2 : x, y: follow ? owner.y + owner.h : y,
-    w: 16, charge: 0.85, fire: 0.45, firing: false, end: H, erode: 0, dead: false,
+    owner, follow, kind, x: follow ? owner.x + owner.w / 2 : x, y: follow ? owner.y + owner.h : y,
+    w: k.w, charge: k.charge, maxCharge: k.charge, fire: k.fire, firing: false, end: H, erode: 0, dead: false,
   });
   Sound.laserCharge();
 }
@@ -615,24 +690,25 @@ function drawLasers() {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (const L of lasers) {
+    const c = LASER_KINDS[L.kind];
     if (!L.firing) {
       // Aviso: línea fina que parpadea y un brillo que crece
-      const k = 1 - L.charge / 0.85;
+      const k = 1 - L.charge / L.maxCharge;
       if (Math.floor(time * 18) % 2 === 0) {
-        ctx.fillStyle = 'rgba(255,59,59,0.55)';
+        ctx.fillStyle = c.warn;
         ctx.fillRect(L.x - 1, L.y, 2, laserEnd(L).end - L.y);
       }
-      ctx.fillStyle = 'rgba(255,120,120,0.8)';
+      ctx.fillStyle = c.mid;
       ctx.beginPath(); ctx.arc(L.x, L.y, 3 + k * 7, 0, TAU); ctx.fill();
     } else {
       const h = L.end - L.y;
-      ctx.fillStyle = 'rgba(255,59,59,0.25)';
+      ctx.fillStyle = c.glow;
       ctx.fillRect(L.x - L.w, L.y, L.w * 2, h);
-      ctx.fillStyle = 'rgba(255,80,80,0.75)';
+      ctx.fillStyle = c.mid;
       ctx.fillRect(L.x - L.w / 2, L.y, L.w, h);
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = c.core;
       ctx.fillRect(L.x - 2, L.y, 4, h);
-      spawn({ x: L.x + rand(-6, 6), y: L.end, vx: rand(-90, 90), vy: rand(-140, -40), life: 0.2, size: 2, color: '#ff6b6b', type: 'spark' });
+      spawn({ x: L.x + rand(-6, 6), y: L.end, vx: rand(-90, 90), vy: rand(-140, -40), life: 0.2, size: 2, color: c.spark, type: 'spark' });
     }
   }
   ctx.restore();
@@ -666,13 +742,23 @@ const BOSS_NAMES = ['MOTHERSHIP', 'MOTHERSHIP MK II', 'MOTHERSHIP MK III'];
 
 function createBoss() {
   const hp = 70 + wave * 10;
-  const level = Math.ceil(wave / 5);
-  boss = {
-    x: W / 2, y: -140, targetY: 120, w: INV_W * 3, h: INV_H * 3,
-    hp, maxHp: hp, t: 0, atk: 2.4, pattern: 0, flash: 0,
+  const k = Math.floor(wave / SECTOR_LEN) - 1; // 0: oleada 5 · 1: oleada 10 · 2: oleada 15…
+  const base = {
+    x: W / 2, y: -140, targetY: 120, hp, maxHp: hp, t: 0, atk: 2.4, pattern: 0, flash: 0,
     entering: true, dying: 0, burst: 0, burstTimer: 0, boomTimer: 0, dead: false,
-    // Nivel 2: suelta escoltas · Nivel 3+: además dispara el rayo láser
-    level, escort: 4,
+  };
+  if (k === 1) {
+    // MAGMA: medusa gigante de lava, jefa de la nebulosa
+    boss = {
+      ...base, kind: 'magma', name: 'MAGMA', level: 2, w: 136, h: 80, targetY: 132,
+      tx: W / 2, wander: 2.5, blink: 0, moved: false, alpha: 1, intangible: false,
+    };
+    return;
+  }
+  // Nave nodriza: nivel 2 suelta escoltas · nivel 3+ además dispara el rayo
+  const level = k <= 0 ? 1 : k;
+  boss = {
+    ...base, kind: 'mothership', w: INV_W * 3, h: INV_H * 3, level, escort: 4,
     name: BOSS_NAMES[Math.min(level, 3) - 1] + (level > 3 ? ' +' + (level - 3) : ''),
   };
 }
@@ -686,13 +772,14 @@ function updateBoss(dt) {
     b.x += rand(-1, 1) * 2;
     if (b.boomTimer <= 0) {
       b.boomTimer = 0.07;
-      explode(b.x + rand(-b.w / 2, b.w / 2), b.y + rand(-b.h / 2, b.h / 2), pick(['#ff3b5c', '#ffd23f', '#fff']), 14, 200);
+      const colors = b.kind === 'magma' ? ['#ff8c1a', '#ffd23f', '#ff3b3b'] : ['#ff3b5c', '#ffd23f', '#fff'];
+      explode(b.x + rand(-b.w / 2, b.w / 2), b.y + rand(-b.h / 2, b.h / 2), pick(colors), 14, 200);
       Sound.explode();
       addShake(4);
     }
     if (b.dying <= 0) {
       b.dead = true;
-      explode(b.x, b.y, '#ff3b5c', 90, 480);
+      explode(b.x, b.y, b.kind === 'magma' ? '#ff8c1a' : '#ff3b5c', 90, 480);
       explode(b.x, b.y, '#ffd23f', 50, 300);
       Sound.big(); addShake(16); flash(0.35);
       vibrate([200, 80, 200]);
@@ -711,6 +798,7 @@ function updateBoss(dt) {
     return;
   }
   const enraged = b.hp < b.maxHp * 0.5;
+  if (b.kind === 'magma') { updateMagma(b, dt, enraged); return; }
   b.t += dt * (enraged ? 1.4 : 1);
   b.x = W / 2 + Math.sin(b.t * 0.7) * (W / 2 - 110);
   b.y = b.targetY + Math.sin(b.t * 1.3) * 18;
@@ -750,8 +838,137 @@ function updateBoss(dt) {
   }
 }
 
+// MAGMA: deriva por la pantalla y alterna lluvia de lava, crías y teletransporte
+function updateMagma(b, dt, enraged) {
+  b.t += dt * (enraged ? 1.3 : 1);
+  if (b.blink > 0) {
+    // Se desvanece, cambia de lugar y reaparece con un anillo de lava
+    b.blink -= dt;
+    if (b.blink <= 0.5 && !b.moved) {
+      b.moved = true;
+      b.x = b.tx = rr('boss', 150, W - 150);
+    }
+    b.alpha = b.blink > 0.5 ? (b.blink - 0.5) / 0.5 : 1 - Math.max(b.blink, 0) / 0.5;
+    b.intangible = b.alpha < 0.5;
+    if (b.blink <= 0) {
+      b.alpha = 1; b.intangible = false; b.moved = false;
+      const n = enraged ? 14 : 10;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * TAU + b.t;
+        dropLava(b.x, b.y + 10, Math.cos(a) * 170, Math.sin(a) * 170);
+      }
+      Sound.lava();
+    }
+  } else {
+    b.wander -= dt;
+    if (b.wander <= 0) { b.wander = 2.5; b.tx = rr('boss', 150, W - 150); }
+    b.x += (b.tx - b.x) * Math.min(1, dt * 0.8);
+  }
+  b.y = b.targetY + Math.sin(b.t * 1.1) * 22;
+  if (!player.alive) return;
+
+  b.atk -= dt;
+  if (b.atk <= 0 && b.blink <= 0) {
+    b.atk = enraged ? 1.5 : 2.2;
+    const p = b.pattern++ % 3;
+    if (p === 0) {
+      // Lluvia de lava
+      const n = enraged ? 10 : 7;
+      for (let i = 0; i < n; i++) {
+        dropLava(b.x + rr('boss', -b.w * 0.45, b.w * 0.45), b.y + b.h * 0.3, rr('boss', -35, 35), rr('boss', 140, 220));
+      }
+      Sound.lava();
+    } else if (p === 1) {
+      spawnMagmitas(b.x, b.y + b.h / 2, enraged ? 3 : 2);
+    } else {
+      b.blink = 1;
+      b.moved = false;
+      Sound.warp();
+    }
+  }
+}
+
 function bossShot(x, y, a, sp) {
   enemyBullets.push({ x: x - 5, y: y - 5, w: 10, h: 10, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, kind: 'orb', dead: false });
+}
+
+// ------------------------------------------------------------------
+// Peligros de cada sector: asteroides (3) y erupciones solares (5)
+// ------------------------------------------------------------------
+function updateHazards(dt) {
+  for (const a of asteroids) {
+    a.x += a.vx * dt;
+    a.rot += a.vr * dt;
+    a.flash = Math.max(0, a.flash - dt);
+    if (a.x < -80 || a.x > W + 80) a.dead = true;
+  }
+  if (banner.t > 0.8 || !player.alive) return;
+  hazardTimer -= dt;
+  if (hazardTimer > 0) return;
+  if (sector === 2) {
+    hazardTimer = rr('hazard', 2.2, 4.2);
+    const dir = R.hazard() < 0.5 ? 1 : -1;
+    spawnAsteroid(dir > 0 ? -50 : W + 50, rr('hazard', 200, 350), dir);
+  } else if (sector >= 4) {
+    hazardTimer = rr('hazard', 5, 8);
+    if (!lasers.some((L) => L.kind === 'flare')) {
+      startLaser({ x: rr('hazard', 60, W - 60), y: 24, kind: 'flare' });
+    }
+  } else {
+    hazardTimer = 3;
+  }
+}
+
+function spawnAsteroid(x, y, dir) {
+  const r = rr('hazard', 16, 30);
+  const verts = Array.from({ length: 9 }, () => rr('hazard', 0.75, 1.15));
+  asteroids.push({
+    x, y, r, verts, vx: dir * rr('hazard', 55, 115), rot: 0, vr: rr('hazard', -1.5, 1.5),
+    hp: r > 24 ? 4 : 3, flash: 0, dead: false,
+  });
+}
+
+// Los asteroides frenan disparos de los dos lados; romperlos da puntos
+function hitAsteroid(rect, byPlayer) {
+  for (const a of asteroids) {
+    if (a.dead) continue;
+    const box = { x: a.x - a.r * 0.8, y: a.y - a.r * 0.8, w: a.r * 1.6, h: a.r * 1.6 };
+    if (!overlap(rect, box)) continue;
+    a.hp--;
+    a.flash = 0.08;
+    if (a.hp <= 0) {
+      a.dead = true;
+      explode(a.x, a.y, '#d9a066', 18, 170);
+      Sound.rock();
+      if (byPlayer) { addScore(50); floatText(a.x, a.y, '50', '#d9a066', 10); }
+    }
+    return true;
+  }
+  return false;
+}
+
+function drawAsteroids() {
+  for (const a of asteroids) {
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.rot);
+    ctx.beginPath();
+    a.verts.forEach((k, i) => {
+      const ang = (i / a.verts.length) * TAU;
+      const px = Math.cos(ang) * a.r * k, py = Math.sin(ang) * a.r * k;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    const g = ctx.createRadialGradient(-a.r * 0.3, -a.r * 0.3, 2, 0, 0, a.r * 1.1);
+    g.addColorStop(0, a.flash > 0 ? '#ffffff' : '#a8896b');
+    g.addColorStop(1, a.flash > 0 ? '#ffffff' : '#3b2a1f');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,220,180,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 // ------------------------------------------------------------------
@@ -810,7 +1027,7 @@ function cellRange(b, r) {
 }
 
 // Devuelve true si la bala chocó contra un búnker (y lo erosiona)
-function hitBunkers(rect, down) {
+function hitBunkers(rect, down, radius = 2.6) {
   for (const b of bunkers) {
     if (!overlap(rect, b)) continue;
     const { c0, c1, r0, r1 } = cellRange(b, rect);
@@ -818,7 +1035,7 @@ function hitBunkers(rect, down) {
     for (let k = 0; k <= r1 - r0; k++) {
       const r = down ? r0 + k : r1 - k;
       for (let c = c0; c <= c1; c++) {
-        if (b.cells[r * BK_COLS + c]) { erode(b, c, r, 2.6); return true; }
+        if (b.cells[r * BK_COLS + c]) { erode(b, c, r, radius); return true; }
       }
     }
   }
@@ -1217,7 +1434,7 @@ function collisions() {
   // Balas del jugador vs balas enemigas (se anulan)
   for (const b of bullets) {
     for (const e of enemyBullets) {
-      if (!e.dead && e.kind !== 'orb' && overlap(b, e)) {
+      if (!e.dead && e.kind !== 'orb' && e.kind !== 'lava' && overlap(b, e)) {
         b.dead = true; e.dead = true;
         explode(b.x, b.y, '#ffffff', 8, 120);
         break;
@@ -1228,6 +1445,7 @@ function collisions() {
   for (const b of bullets) {
     if (b.dead) continue;
     if (hitBunkers(b, false)) { b.dead = true; continue; }
+    if (hitAsteroid(b, true)) { b.dead = true; continue; }
 
     for (const inv of invaders) {
       if (inv.dead || b.hits.includes(inv) || !overlap(b, inv)) continue;
@@ -1242,7 +1460,7 @@ function collisions() {
     }
     if (b.dead) continue;
 
-    if (boss && boss.dying <= 0 && !boss.entering) {
+    if (boss && boss.dying <= 0 && !boss.entering && !boss.intangible) {
       const bb = { x: boss.x - boss.w / 2, y: boss.y - boss.h / 2, w: boss.w, h: boss.h };
       if (overlap(b, bb)) {
         b.dead = true; stats.hits++;
@@ -1272,7 +1490,8 @@ function collisions() {
   const pb = playerBox();
   for (const e of enemyBullets) {
     if (e.dead) continue;
-    if (hitBunkers(e, true)) { e.dead = true; continue; }
+    if (hitAsteroid(e, false)) { e.dead = true; continue; }
+    if (hitBunkers(e, true, e.kind === 'lava' ? 3.6 : 2.6)) { e.dead = true; continue; }
     if (player.alive && overlap(e, pb)) { e.dead = true; hitPlayer(); }
   }
 
@@ -1290,7 +1509,7 @@ function collisions() {
     }
   }
 
-  compact(bullets); compact(enemyBullets); compact(invaders); compact(powerups);
+  compact(bullets); compact(enemyBullets); compact(invaders); compact(powerups); compact(asteroids);
 }
 
 // ------------------------------------------------------------------
@@ -1305,11 +1524,14 @@ function update(dt) {
   updateDeath(dt);
   if (state !== 'playing') return;
 
+  const pull = sector === 3 ? GRAVITY : 0; // agujero negro: curva todos los disparos hacia el centro
   for (const b of bullets) {
+    if (pull) b.vx += (W / 2 - b.x) * pull * dt;
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.y + b.h < 0 || b.x < -20 || b.x > W + 20) b.dead = true;
   }
   for (const e of enemyBullets) {
+    if (pull) e.vx += (W / 2 - e.x) * pull * dt;
     e.x += e.vx * dt; e.y += e.vy * dt;
     if (e.y > H + 20 || e.y < -40 || e.x < -40 || e.x > W + 40) e.dead = true;
   }
@@ -1331,6 +1553,7 @@ function update(dt) {
   }
   if (state !== 'playing') return;
   updateLasers(dt);
+  updateHazards(dt);
   updateUfo(dt);
   collisions();
 
@@ -1355,7 +1578,9 @@ function update(dt) {
 }
 
 function updateAmbient(dt) {
-  const boost = state === 'playing' && banner && banner.t > 0 && !cfg.boss ? 3 : 1;
+  warp = Math.max(0, warp - dt);
+  const intro = state === 'playing' && banner && banner.t > 0 && !cfg.boss ? 3 : 1;
+  const boost = intro + warp * 12;
   for (const s of stars) {
     s.y += s.v * dt * boost;
     if (s.y > H) { s.y -= H; s.x = rand(0, W); }
@@ -1368,18 +1593,96 @@ function updateAmbient(dt) {
 // ------------------------------------------------------------------
 // Render
 // ------------------------------------------------------------------
+// Nebulosa pre-dibujada (el doble de ancho para desplazarla sin cortes)
+let nebulaCanvas = null;
+function nebula() {
+  if (nebulaCanvas) return nebulaCanvas;
+  const c = document.createElement('canvas');
+  c.width = W * 2; c.height = H;
+  const x = c.getContext('2d');
+  const blobs = [
+    ['rgba(155,60,255,0.22)', 300, 180, 260], ['rgba(255,79,216,0.16)', 760, 330, 300],
+    ['rgba(93,193,185,0.10)', 1220, 150, 240], ['rgba(255,79,216,0.14)', 1560, 390, 280],
+    ['rgba(155,60,255,0.18)', 1820, 210, 220],
+  ];
+  for (const [col, bx, by, br] of blobs) {
+    const g = x.createRadialGradient(bx, by, 0, bx, by, br);
+    g.addColorStop(0, col);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, c.width, c.height);
+  }
+  nebulaCanvas = c;
+  return c;
+}
+
+function drawSectorScenery() {
+  if (sector === 0) {
+    // La Tierra asoma abajo, con el brillo de la atmósfera
+    const r = 1400, cy = H + r - 46;
+    const g = ctx.createLinearGradient(0, H - 46, 0, H);
+    g.addColorStop(0, 'rgba(40,110,190,0.55)');
+    g.addColorStop(1, 'rgba(8,26,52,0.9)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(W / 2, cy, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(93,193,185,0.45)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(W / 2, cy, r, 0, TAU); ctx.stroke();
+  } else if (sector === 1) {
+    const off = (time * 10) % (W * 2);
+    ctx.drawImage(nebula(), -off, 0);
+    ctx.drawImage(nebula(), W * 2 - off, 0);
+  } else if (sector === 2) {
+    // Polvo del cinturón: una franja tenue
+    ctx.fillStyle = 'rgba(217,160,102,0.07)';
+    ctx.beginPath(); ctx.ellipse(W / 2, 280, W * 0.75, 90, -0.08, 0, TAU); ctx.fill();
+  } else if (sector === 3) {
+    // Agujero negro con disco de acreción
+    const cx = W / 2, cy = 150;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 3; i++) {
+      ctx.strokeStyle = ['rgba(255,140,60,0.22)', 'rgba(155,123,255,0.20)', 'rgba(255,79,216,0.12)'][i];
+      ctx.lineWidth = 10 - i * 3;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 120 + i * 26, 30 + i * 7, Math.sin(time * 0.3) * 0.08, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
+    const g = ctx.createRadialGradient(cx, cy, 20, cx, cy, 70);
+    g.addColorStop(0, '#000000');
+    g.addColorStop(0.6, 'rgba(0,0,0,0.9)');
+    g.addColorStop(1, 'rgba(155,123,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, 70, 0, TAU); ctx.fill();
+  } else {
+    // Borde del sol arriba, latiendo
+    const r = 900, cy = -r + 70 + Math.sin(time * 1.5) * 4;
+    const g = ctx.createRadialGradient(W / 2, cy, r - 60, W / 2, cy, r + 90);
+    g.addColorStop(0, 'rgba(255,230,140,0.9)');
+    g.addColorStop(0.4, 'rgba(255,140,26,0.55)');
+    g.addColorStop(1, 'rgba(255,60,20,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, 200);
+  }
+}
+
 function drawBackground() {
+  const [c0, c1, c2] = SECTORS[sector].bg;
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#05010f');
-  g.addColorStop(0.6, '#0a0620');
-  g.addColorStop(1, '#130a2e');
+  g.addColorStop(0, c0);
+  g.addColorStop(0.6, c1);
+  g.addColorStop(1, c2);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
+  if (state !== 'menu') drawSectorScenery();
+  // En el salto al hiperespacio las estrellas se estiran
+  const stretch = 1 + warp * 24;
   for (const s of stars) {
     const a = s.l === 0 ? 0.35 + 0.35 * Math.sin(time * 2 + s.tw) : s.l === 1 ? 0.7 : 1;
     ctx.globalAlpha = a;
-    ctx.fillStyle = s.l === 2 ? '#cfe9ff' : '#ffffff';
-    ctx.fillRect(s.x, s.y, s.s, s.s * (s.l === 2 ? 3 : 1));
+    ctx.fillStyle = s.l === 2 ? '#cfe9ff' : sector === 4 ? '#ffe2c4' : '#ffffff';
+    ctx.fillRect(s.x, s.y, s.s, s.s * (s.l === 2 ? 3 : 1) * stretch);
   }
   ctx.globalAlpha = 1;
 }
@@ -1406,8 +1709,61 @@ function drawPlayer() {
   }
 }
 
+// Medusa de lava (MAGMA y sus crías): campana con brillo, ojos y tentáculos
+function drawJelly(cx, cy, r, t, { alpha = 1, flashOn = false, tentacles = 7 } = {}) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < tentacles; i++) {
+    const fx = cx - r * 0.7 + (tentacles > 1 ? (i / (tentacles - 1)) * r * 1.4 : r * 0.7);
+    const len = r * (0.9 + 0.25 * Math.sin(t * 2 + i));
+    ctx.strokeStyle = flashOn ? '#ffffff' : i % 2 ? '#ff5a1f' : '#ff8c1a';
+    ctx.lineWidth = Math.max(2, r * 0.09);
+    ctx.beginPath();
+    ctx.moveTo(fx, cy + r * 0.05);
+    for (let k = 1; k <= 6; k++) {
+      const f = k / 6;
+      ctx.lineTo(fx + Math.sin(t * 3 + i * 0.9 + k * 0.7) * r * 0.14 * f, cy + f * len);
+    }
+    ctx.stroke();
+  }
+  const pulse = 1 + Math.sin(t * 2.4) * 0.04;
+  const g = ctx.createRadialGradient(cx, cy - r * 0.4, r * 0.1, cx, cy - r * 0.1, r * 1.05);
+  g.addColorStop(0, flashOn ? '#ffffff' : '#fff2a8');
+  g.addColorStop(0.35, flashOn ? '#ffffff' : '#ffb020');
+  g.addColorStop(0.75, '#ff5a1f');
+  g.addColorStop(1, '#9e1b0c');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, r * pulse, r * 0.78 * pulse, 0, Math.PI, TAU);
+  const scallops = 7;
+  for (let i = 0; i <= scallops; i++) {
+    ctx.lineTo(cx + r * pulse - (i / scallops) * 2 * r * pulse, cy + (i % 2 ? r * 0.12 : 0));
+  }
+  ctx.closePath();
+  ctx.fill();
+  // Ojos
+  ctx.fillStyle = '#2a0500';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(cx + side * r * 0.28, cy - r * 0.3, r * 0.11, r * 0.16, 0, 0, TAU);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#fff3c4';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(cx + side * r * 0.26, cy - r * 0.35, r * 0.04, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawInvaders() {
   for (const inv of invaders) {
+    if (inv.kind === 'magmita') {
+      drawJelly(inv.x + inv.w / 2, inv.y + inv.h * 0.45, 14, time * 1.5 + inv.wob, { flashOn: inv.flash > 0, tentacles: 3 });
+      continue;
+    }
     const spr = inv.flash > 0 ? SPR.invFlash : SPR.inv[inv.type];
     if (!spr) continue;
     // Pequeño "squash" alternado para simular animación de 2 frames
@@ -1424,24 +1780,32 @@ function drawInvaders() {
 function drawBoss() {
   if (!boss) return;
   const b = boss;
-  const spr = b.flash > 0 ? SPR.bossFlash : SPR.boss;
+  const magma = b.kind === 'magma';
+  const glow = magma ? '255,140,26' : '255,59,92';
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = magma ? b.alpha : 1;
   const g = ctx.createRadialGradient(b.x, b.y, 10, b.x, b.y, b.w);
-  g.addColorStop(0, 'rgba(255,59,92,0.35)');
-  g.addColorStop(1, 'rgba(255,59,92,0)');
+  g.addColorStop(0, `rgba(${glow},0.35)`);
+  g.addColorStop(1, `rgba(${glow},0)`);
   ctx.fillStyle = g;
   ctx.fillRect(b.x - b.w, b.y - b.w, b.w * 2, b.w * 2);
   ctx.restore();
-  if (spr) ctx.drawImage(spr, b.x - b.w / 2, b.y - b.h / 2, b.w, b.h);
+  if (magma) {
+    drawJelly(b.x, b.y + 22, 75, b.t, { alpha: b.alpha, flashOn: b.flash > 0, tentacles: 7 });
+  } else {
+    const spr = b.flash > 0 ? SPR.bossFlash : SPR.boss;
+    if (spr) ctx.drawImage(spr, b.x - b.w / 2, b.y - b.h / 2, b.w, b.h);
+  }
+  if (state === 'gameover') return;
 
   // Barra de vida
   const bw = 420, bx = (W - bw) / 2, by = 62;
   ctx.fillStyle = 'rgba(255,255,255,0.12)';
   ctx.fillRect(bx, by, bw, 8);
-  ctx.fillStyle = b.hp < b.maxHp * 0.5 ? '#ffd23f' : '#ff3b5c';
+  ctx.fillStyle = b.hp < b.maxHp * 0.5 ? '#ffd23f' : magma ? '#ff8c1a' : '#ff3b5c';
   ctx.fillRect(bx, by, (bw * Math.max(0, b.hp)) / b.maxHp, 8);
-  drawText(b.name, W / 2, by - 10, { size: 8, color: '#ff8aa0' });
+  drawText(b.name, W / 2, by - 10, { size: 8, color: magma ? '#ffb070' : '#ff8aa0' });
 }
 
 function drawUfo() {
@@ -1475,7 +1839,14 @@ function drawBullets() {
     ctx.fillRect(b.x, b.y, b.w, b.h);
   }
   for (const e of enemyBullets) {
-    if (e.kind === 'orb') {
+    if (e.kind === 'lava') {
+      ctx.fillStyle = 'rgba(255,120,20,0.35)';
+      ctx.beginPath(); ctx.arc(e.x + 5, e.y + 5, 10, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(255,90,31,0.6)';
+      ctx.fillRect(e.x + 3, e.y - 8, 4, 10);
+      ctx.fillStyle = '#ffd27a';
+      ctx.beginPath(); ctx.arc(e.x + 5, e.y + 5, 4.5, 0, TAU); ctx.fill();
+    } else if (e.kind === 'orb') {
       ctx.fillStyle = 'rgba(255,59,92,0.4)';
       ctx.beginPath(); ctx.arc(e.x + 5, e.y + 5, 9, 0, TAU); ctx.fill();
       ctx.fillStyle = '#ffd0d8';
@@ -1532,7 +1903,7 @@ function drawHUD() {
   const hi = mode === 'classic' ? Math.max(best(), score) : best(); // el récord local es del modo normal
   drawText('HI ' + String(hi).padStart(7, '0'), W / 2, 20, { size: 10, color: '#ff4fd8' });
   const modeTag = mode === 'daily' ? (practice ? 'PRACTICE · ' : 'DAILY · ') : '';
-  drawText(modeTag + 'WAVE ' + wave, W / 2, 38, { size: 9, color: mode === 'daily' ? '#ffd23f' : '#5dc1b9' });
+  drawText(modeTag + 'S' + (sector + 1) + ' · WAVE ' + wave, W / 2, 38, { size: 9, color: mode === 'daily' ? '#ffd23f' : SECTORS[sector].color });
 
   for (let i = 0; i < lives; i++) drawShipIcon(16 + i * 34, H - 26, 0.32);
   const owned = UPGRADES.filter((u) => upgrades[u.id] > 0 && u.id !== 'life')
@@ -1567,6 +1938,7 @@ function drawWorld() {
   if (shake > 0) ctx.translate(rand(-shake, shake), rand(-shake, shake));
   drawBackground();
   drawBunkers();
+  drawAsteroids();
   drawInvaders();
   drawBoss();
   drawUfo();
@@ -1671,6 +2043,7 @@ function drawGameOver() {
   const rows = [
     ['SCORE', String(score)],
     ['WAVE', String(wave)],
+    ['SECTOR', String(sector + 1)],
     ['KILLS', String(stats.kills)],
     ['ACCURACY', acc + '%'],
     ['MAX COMBO', String(maxCombo)],
@@ -1810,6 +2183,14 @@ if (TEST_MODE) {
     get kinds() { return invaders.reduce((acc, i) => ((acc[i.kind] = (acc[i.kind] || 0) + 1), acc), {}); },
     get lasers() { return lasers.map((L) => ({ firing: L.firing, x: L.x, end: L.end })); },
     get bossInfo() { return boss ? { level: boss.level, name: boss.name } : null; },
+    get sector() { return sector; },
+    get bannerText() { return banner ? `${banner.text}|${banner.sub}` : ''; },
+    get asteroidCount() { return asteroids.filter((a) => !a.dead).length; },
+    get lavaCount() { return enemyBullets.filter((e) => e.kind === 'lava').length; },
+    get bulletXs() { return bullets.map((b) => Math.round(b.x)); },
+    get bossState() { return boss ? { x: boss.x, intangible: !!boss.intangible, blink: boss.blink || 0 } : null; },
+    spawnAsteroidAt(x, y) { cheated = true; spawnAsteroid(x, y, 0); asteroids[asteroids.length - 1].vx = 0; },
+    hazardNow() { hazardTimer = 0; if (F) F.magmaTimer = 0; },
     killKind(kind) {
       cheated = true;
       const inv = invaders.find((i) => i.kind === kind && !i.dead);

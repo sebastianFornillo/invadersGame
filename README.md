@@ -22,7 +22,8 @@ Shooter arcade inspirado en Space Invaders, en JavaScript puro: sin frameworks n
 - **Desafío diario:** las mismas oleadas para todos cada día (azar con semilla), un intento oficial, resultado para compartir con emojis y ranking de HOY
 - **Mejoras entre oleadas:** después de las oleadas pares y de cada jefe se elige 1 de 3 (cadencia, cañón doble, perforante, motores, imán, escudo automático, power-ups largos, vida extra)
 - **Enemigos nuevos:** divisores que se parten en dos (oleada 6+) e invasores láser con aviso previo (oleada 8+); los búnkers frenan el rayo mientras aguantan
-- **Jefes por niveles:** desde la oleada 10 sueltan escoltas y desde la 15 también disparan el rayo
+- **Sectores espaciales:** cada 5 oleadas saltás al hiperespacio a un escenario nuevo con su propio peligro: Órbita terrestre → Nebulosa (magmitas) → Cinturón de asteroides (frenan disparos) → Agujero negro (la gravedad curva los disparos) → Corona solar (erupciones con aviso)
+- **Jefes por sector:** MOTHERSHIP (oleada 5), **MAGMA** (10, medusa de lava que llueve lava, suelta crías y se teletransporta), MK II con escoltas (15) y MK III con rayo (20 en adelante)
 - **Opciones:** volumen, temblor, destellos, efecto TV, vibración, botones táctiles grandes y modo zurdo (respeta "reducir movimiento" del sistema)
 - **Mando:** también navega todas las pantallas (cruz o stick, A elige, B vuelve)
 - **App instalable (PWA):** se agrega a la pantalla de inicio y funciona sin internet

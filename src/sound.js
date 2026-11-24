@@ -103,6 +103,12 @@ export const Sound = {
     ),
   clear: () => seq([392, 523, 659, 784, 1047], 0.07, { d: 0.12, type: 'triangle', v: 0.16 }),
   over: () => seq([392, 330, 262, 196], 0.22, { d: 0.25, v: 0.12 }),
+  warp: () => {
+    noise({ d: 1.2, v: 0.25, f: 300, f2: 4000 });
+    tone({ f: 80, f2: 1400, d: 1.1, type: 'sawtooth', v: 0.06 });
+  },
+  lava: () => tone({ f: 140, f2: 60, d: 0.35, type: 'triangle', v: 0.16 }),
+  rock: () => noise({ d: 0.35, v: 0.3, f: 900, f2: 120 }),
   laserCharge: () => tone({ f: 180, f2: 900, d: 0.8, type: 'sawtooth', v: 0.05 }),
   laserFire: () => {
     noise({ d: 0.45, v: 0.3, f: 3000, f2: 400 });
