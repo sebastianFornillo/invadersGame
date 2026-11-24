@@ -17,6 +17,8 @@ import {
 import { online, api, league } from './online.js';
 import { ui } from './ui.js';
 import { createStreams, randomSeed } from './rng.js';
+import { settings } from './settings.js';
+import { UPGRADES, emptyLevels, upgradeDue, offerUpgrades } from './upgrades.js';
 import { todayUTC, dailySeed, dailyRecord, formatDay, gridText } from './daily.js';
 
 // Modo test (?test=1): expone ganchos para los tests automáticos.
@@ -37,10 +39,15 @@ const MAX_LIVES = 6;
 const EXTRA_LIFE_EVERY = 25000;
 
 const INV_TYPES = [
-  { color: '#5dffa0', points: 100, hp: 1 },
-  { color: '#4fd8ff', points: 200, hp: 1 },
-  { color: '#ff5fd2', points: 300, hp: 2 },
+  { color: '#5dffa0', points: 100, hp: 1, kind: 'basic' },
+  { color: '#4fd8ff', points: 200, hp: 1, kind: 'basic' },
+  { color: '#ff5fd2', points: 300, hp: 2, kind: 'basic' },
+  { color: '#ff9f1c', points: 150, hp: 1, kind: 'splitter' }, // se parte en dos al morir (oleada 6+)
+  { color: '#ff3b3b', points: 400, hp: 2, kind: 'laser' },    // dispara un rayo (oleada 8+)
+  { color: '#ffe066', points: 50, hp: 1, kind: 'mini' },      // los que salen del divisor
 ];
+const T_SPLITTER = 3, T_LASER = 4, T_MINI = 5;
+const MINI_W = 19, MINI_H = 24;
 
 const POWERS = {
   T: { name: 'TRIPLE', color: '#ffd23f', weight: 0.32 },
@@ -60,7 +67,7 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // Azar de la jugabilidad, con semilla (el desafío diario es igual para todos).
 // Los efectos visuales siguen usando Math.random.
-const STREAMS = ['fire', 'dive', 'ufo', 'drop', 'bunker'];
+const STREAMS = ['fire', 'dive', 'ufo', 'drop', 'bunker', 'upgrade'];
 let R = createStreams(randomSeed(), STREAMS);
 const rr = (stream, a, b) => a + R[stream]() * (b - a);
 const rpick = (stream, arr) => arr[Math.floor(R[stream]() * arr.length)];
@@ -147,7 +154,7 @@ const overlayCanvas = (() => {
 const input = {
   keys: new Set(),
   touch: { left: false, right: false, fire: false },
-  padX: 0, padFire: false, padPrev: {},
+  padX: 0, padFire: false, padPrev: {}, padAxisPrev: 0,
   get left() { return this.keys.has('left') || this.touch.left; },
   get right() { return this.keys.has('right') || this.touch.right; },
   get fire() { return this.keys.has('fire') || this.touch.fire || this.padFire; },
@@ -177,6 +184,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
   if (e.code === 'KeyM') { Sound.toggle(); syncMute(); }
   if (e.code === 'KeyR') openRankingFromGame();
+  if (e.code === 'KeyO') openOptionsFromGame();
 });
 window.addEventListener('keyup', (e) => {
   const k = KEYMAP[e.code];
@@ -223,6 +231,14 @@ setupPWA({ onInstallAvailable: (on) => { if (installBtn) installBtn.hidden = !on
 if (installBtn) installBtn.addEventListener('click', () => promptInstall());
 const iosHint = needsIosInstallHint();
 
+const optBtn = document.getElementById('optBtn');
+if (optBtn) optBtn.addEventListener('click', () => openOptionsFromGame());
+settings.onChange((s) => {
+  if (!touchUI) return;
+  touchUI.classList.toggle('big', s.bigTouch);
+  touchUI.classList.toggle('left', s.leftHanded);
+});
+
 const rankBtn = document.getElementById('rankBtn');
 if (rankBtn) {
   rankBtn.hidden = !online.enabled;
@@ -253,10 +269,23 @@ function pollGamepad() {
   if (b(15)) input.padX = 1;
   input.padFire = b(0) || b(7) || b(5);
   const edge = (i) => b(i) && !input.padPrev[i];
-  const actions = !ui.isOpen();
-  if (actions && (edge(0) || edge(9))) { Sound.unlock(); if (state !== 'playing') confirm(); }
-  if (actions && edge(9) && state === 'playing') togglePause();
-  input.padPrev = { 0: b(0), 9: b(9) };
+  if (ui.isOpen()) {
+    // En las pantallas: cruz o stick para moverse, A para elegir, B para volver
+    const ay = pad.axes[1] || 0;
+    const dir = Math.abs(ax) > 0.6 ? Math.sign(ax) : Math.abs(ay) > 0.6 ? Math.sign(ay) : 0;
+    const axisEdge = dir !== 0 && dir !== input.padAxisPrev;
+    input.padAxisPrev = dir;
+    ui.gamepad({
+      prev: edge(14) || edge(12) || (axisEdge && dir < 0),
+      next: edge(15) || edge(13) || (axisEdge && dir > 0),
+      accept: edge(0),
+      back: edge(1),
+    });
+  } else {
+    if (edge(0) || edge(9)) { Sound.unlock(); if (state !== 'playing') confirm(); }
+    if (edge(9) && state === 'playing') togglePause();
+  }
+  input.padPrev = { 0: b(0), 1: b(1), 9: b(9), 12: b(12), 13: b(13), 14: b(14), 15: b(15) };
 }
 
 // ------------------------------------------------------------------
@@ -277,6 +306,8 @@ let F, cfg, banner, clearTimer, waveHits, deathTimer, marchTimer, marchStep;
 let runId = null, runToken = 0, cheated = false;
 // Modo: 'classic' o 'daily' (desafío diario). La práctica del diario no se registra.
 let mode = 'classic', practice = false, dailyDay = null, waveLog = [], menuSel = 0;
+// Mejoras elegidas en esta partida y rayos láser activos
+let upgrades = emptyLevels(), lasers = [];
 
 // Link directo al desafío: ?modo=diario abre el menú con esa opción elegida
 {
@@ -315,6 +346,8 @@ function newGame({ mode: m = 'classic', day = null, practice: p = false } = {}) 
   dailyDay = m === 'daily' ? day || todayUTC() : null;
   R = createStreams(m === 'daily' ? dailySeed(dailyDay) : randomSeed(), STREAMS);
   waveLog = [];
+  upgrades = emptyLevels();
+  lasers = [];
   score = 0; wave = 0; lives = 3; nextLife = EXTRA_LIFE_EVERY;
   combo = 0; comboTimer = 0; maxCombo = 0; newRecord = false;
   stats = { shots: 0, hits: 0, kills: 0 };
@@ -352,7 +385,12 @@ function startWave(n) {
   boss = null;
   waveHits = 0;
   clearTimer = 0;
+  lasers.length = 0;
   buildBunkers();
+  if (upgrades.regen && player.alive && !player.shield) {
+    player.shield = true;
+    floatText(player.x, player.y - 46, 'SHIELD', POWERS.S.color, 10);
+  }
   if (cfg.boss) {
     createBoss();
     banner = { text: 'WARNING', sub: 'MOTHERSHIP APPROACHING', t: 2.6, color: '#ff3b5c' };
@@ -374,15 +412,17 @@ function createFormation() {
     targetY: 64,
     entering: true,
     dir: 1, drop: 0, total: rows * cols,
-    fireTimer: 1.5, diveTimer: cfg.diveInterval,
+    fireTimer: 1.5, diveTimer: cfg.diveInterval, laserTimer: 3,
   };
   for (let r = 0; r < rows; r++) {
-    const type = r === 0 ? 2 : r < Math.ceil(rows / 2) ? 1 : 0;
     for (let c = 0; c < cols; c++) {
+      let type = r === 0 ? 2 : r < Math.ceil(rows / 2) ? 1 : 0;
+      if (wave >= 6 && r === rows - 2) type = T_SPLITTER;
+      if (wave >= 8 && r === 0 && c % 3 === 1) type = T_LASER;
       let hp = INV_TYPES[type].hp;
       if (type === 1 && cfg.armored) hp = 2;
       invaders.push({
-        col: c, row: r, type, hp, x: 0, y: 0, w: INV_W, h: INV_H,
+        col: c, row: r, type, kind: INV_TYPES[type].kind, hp, x: 0, y: 0, w: INV_W, h: INV_H,
         state: 'formation', t: 0, flash: 0, dead: false, shot: false,
       });
     }
@@ -398,7 +438,9 @@ function slotOf(inv) {
 
 function updateFormation(dt) {
   if (!invaders.length) return;
-  const ratio = invaders.length / F.total;
+  // Los mini-invasores no son parte de la formación
+  const members = invaders.filter((i) => i.col != null);
+  const ratio = members.length / F.total;
   const speed = cfg.speed * (1 + (1 - ratio) * 2.6);
 
   if (F.entering) {
@@ -407,7 +449,7 @@ function updateFormation(dt) {
   } else {
     F.x += F.dir * speed * dt;
     let minC = Infinity, maxC = -Infinity;
-    for (const inv of invaders) { if (inv.col < minC) minC = inv.col; if (inv.col > maxC) maxC = inv.col; }
+    for (const inv of members) { if (inv.col < minC) minC = inv.col; if (inv.col > maxC) maxC = inv.col; }
     const left = F.x + minC * CELL_W, right = F.x + maxC * CELL_W + INV_W;
     if (right > W - 14 && F.dir > 0) { F.dir = -1; F.drop += 22; }
     else if (left < 14 && F.dir < 0) { F.dir = 1; F.drop += 22; }
@@ -421,33 +463,20 @@ function updateFormation(dt) {
   const canAttack = !F.entering && banner.t < 0.8 && player.alive;
 
   for (const inv of invaders) {
-    inv.flash = Math.max(0, inv.flash - dt);
-    if (inv.state === 'formation') {
-      const s = slotOf(inv);
-      inv.x = s.x; inv.y = s.y;
-      if (inv.y + inv.h >= PLAYER_Y - 18) { invasion(); return; }
-    } else if (inv.state === 'dive') {
-      inv.t += dt;
-      inv.y += inv.speed * dt;
-      inv.x += ((player.x - (inv.x + inv.w / 2)) * 0.9 + Math.cos(inv.t * 4) * 140 * inv.wob) * dt;
-      inv.x = clamp(inv.x, 4, W - inv.w - 4);
-      if (!inv.shot && inv.t > 0.45 && inv.y < PLAYER_Y - 120) {
-        inv.shot = true;
-        enemyShot(inv.x + inv.w / 2, inv.y + inv.h, true);
-      }
-      if (inv.y > H + 20) { inv.state = 'return'; inv.y = -60; }
-    } else if (inv.state === 'return') {
-      const s = slotOf(inv);
-      const dx = s.x - inv.x, dy = s.y - inv.y;
-      const dist = Math.hypot(dx, dy);
-      const step = 320 * dt;
-      if (dist <= step) { inv.state = 'formation'; inv.x = s.x; inv.y = s.y; }
-      else { inv.x += (dx / dist) * step; inv.y += (dy / dist) * step; }
-    }
-    if (inv.state !== 'return') carveBunkers(inv);
+    if (moveInvader(inv, dt)) { invasion(); return; }
   }
 
   if (!canAttack) return;
+
+  // Rayo láser (desde la oleada 8): uno por vez, con aviso previo
+  if (wave >= 8 && !lasers.length) {
+    F.laserTimer -= dt;
+    if (F.laserTimer <= 0) {
+      F.laserTimer = rr('fire', 3.5, 6.5);
+      const shooters = invaders.filter((i) => i.kind === 'laser' && i.state === 'formation');
+      if (shooters.length) startLaser({ owner: rpick('fire', shooters) });
+    }
+  }
 
   // Disparo: sólo el invasor más bajo de cada columna puede disparar
   F.fireTimer -= dt;
@@ -482,6 +511,133 @@ function updateFormation(dt) {
   }
 }
 
+// Mueve un invasor según su estado. Devuelve true si la formación llegó abajo.
+function moveInvader(inv, dt) {
+  inv.flash = Math.max(0, inv.flash - dt);
+  if (inv.state === 'formation') {
+    const s = slotOf(inv);
+    inv.x = s.x; inv.y = s.y;
+    if (inv.y + inv.h >= PLAYER_Y - 18) return true;
+  } else if (inv.state === 'dive') {
+    inv.t += dt;
+    inv.y += inv.speed * dt;
+    inv.x += ((player.x - (inv.x + inv.w / 2)) * 0.9 + Math.cos(inv.t * 4) * 140 * inv.wob) * dt;
+    inv.x = clamp(inv.x, 4, W - inv.w - 4);
+    if (!inv.shot && inv.t > 0.45 && inv.y < PLAYER_Y - 120) {
+      inv.shot = true;
+      enemyShot(inv.x + inv.w / 2, inv.y + inv.h, true);
+    }
+    if (inv.y > H + 20) {
+      // Los mini-invasores se van; los de la formación vuelven desde arriba
+      if (inv.col == null) inv.dead = true;
+      else { inv.state = 'return'; inv.y = -60; }
+    }
+  } else if (inv.state === 'return') {
+    const s = slotOf(inv);
+    const dx = s.x - inv.x, dy = s.y - inv.y;
+    const dist = Math.hypot(dx, dy);
+    const step = 320 * dt;
+    if (dist <= step) { inv.state = 'formation'; inv.x = s.x; inv.y = s.y; }
+    else { inv.x += (dx / dist) * step; inv.y += (dy / dist) * step; }
+  }
+  if (inv.state !== 'return') carveBunkers(inv);
+  return false;
+}
+
+// Mini-invasores que salen del divisor o que suelta el jefe
+function spawnMinis(x, y, n = 2) {
+  for (let i = 0; i < n; i++) {
+    const side = i % 2 ? 1 : -1;
+    invaders.push({
+      type: T_MINI, kind: 'mini', hp: 1, x: clamp(x - MINI_W / 2 + side * 14, 4, W - MINI_W - 4), y,
+      w: MINI_W, h: MINI_H, state: 'dive', t: i * 0.2, flash: 0, dead: false, shot: true,
+      speed: Math.min(220 + wave * 6, 340), wob: side,
+    });
+  }
+}
+
+// ------------------------------------------------------------------
+// Rayos láser (invasor láser y jefe nivel 3+)
+// ------------------------------------------------------------------
+function startLaser({ owner, x, y }) {
+  const follow = !!owner && owner !== boss;
+  lasers.push({
+    owner, follow, x: follow ? owner.x + owner.w / 2 : x, y: follow ? owner.y + owner.h : y,
+    w: 16, charge: 0.85, fire: 0.45, firing: false, end: H, erode: 0, dead: false,
+  });
+  Sound.laserCharge();
+}
+
+// Hasta dónde llega el rayo: lo frena la primera celda de búnker que encuentra
+function laserEnd(L) {
+  let end = H, hit = null;
+  for (const b of bunkers) {
+    if (L.x + L.w / 2 < b.x || L.x - L.w / 2 > b.x + b.w) continue;
+    const { c0, c1 } = cellRange(b, { x: L.x - L.w / 2, y: b.y, w: L.w, h: 1 });
+    for (let r = 0; r < BK_ROWS; r++) {
+      let col = -1;
+      for (let c = c0; c <= c1; c++) if (b.cells[r * BK_COLS + c]) { col = c; break; }
+      if (col >= 0) {
+        const yy = b.y + r * BK_CELL;
+        if (yy > L.y && yy < end) { end = yy; hit = { b, c: col, r }; }
+        break;
+      }
+    }
+  }
+  return { end, hit };
+}
+
+function updateLasers(dt) {
+  for (const L of lasers) {
+    const ownerGone = L.owner && (L.owner.dead || (L.owner === boss && boss.dying > 0));
+    if (ownerGone && !L.firing) { L.dead = true; continue; }
+    if (L.follow && !L.owner.dead) { L.x = L.owner.x + L.owner.w / 2; L.y = L.owner.y + L.owner.h; }
+    if (!L.firing) {
+      L.charge -= dt;
+      if (L.charge <= 0) { L.firing = true; Sound.laserFire(); addShake(3); }
+      continue;
+    }
+    L.fire -= dt;
+    const { end, hit } = laserEnd(L);
+    L.end = end;
+    if (hit) {
+      L.erode -= dt;
+      if (L.erode <= 0) { L.erode = 0.05; erode(hit.b, hit.c, hit.r, 1.6); }
+    }
+    const beam = { x: L.x - L.w / 2, y: L.y, w: L.w, h: end - L.y };
+    if (player.alive && overlap(beam, playerBox())) hitPlayer();
+    if (L.fire <= 0) L.dead = true;
+  }
+  compact(lasers);
+}
+
+function drawLasers() {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const L of lasers) {
+    if (!L.firing) {
+      // Aviso: línea fina que parpadea y un brillo que crece
+      const k = 1 - L.charge / 0.85;
+      if (Math.floor(time * 18) % 2 === 0) {
+        ctx.fillStyle = 'rgba(255,59,59,0.55)';
+        ctx.fillRect(L.x - 1, L.y, 2, laserEnd(L).end - L.y);
+      }
+      ctx.fillStyle = 'rgba(255,120,120,0.8)';
+      ctx.beginPath(); ctx.arc(L.x, L.y, 3 + k * 7, 0, TAU); ctx.fill();
+    } else {
+      const h = L.end - L.y;
+      ctx.fillStyle = 'rgba(255,59,59,0.25)';
+      ctx.fillRect(L.x - L.w, L.y, L.w * 2, h);
+      ctx.fillStyle = 'rgba(255,80,80,0.75)';
+      ctx.fillRect(L.x - L.w / 2, L.y, L.w, h);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(L.x - 2, L.y, 4, h);
+      spawn({ x: L.x + rand(-6, 6), y: L.end, vx: rand(-90, 90), vy: rand(-140, -40), life: 0.2, size: 2, color: '#ff6b6b', type: 'spark' });
+    }
+  }
+  ctx.restore();
+}
+
 function enemyShot(x, y, aimed) {
   const sp = cfg.bulletSpeed;
   let vx = 0, vy = sp;
@@ -506,12 +662,18 @@ function invasion() {
 // ------------------------------------------------------------------
 // Jefe
 // ------------------------------------------------------------------
+const BOSS_NAMES = ['MOTHERSHIP', 'MOTHERSHIP MK II', 'MOTHERSHIP MK III'];
+
 function createBoss() {
   const hp = 70 + wave * 10;
+  const level = Math.ceil(wave / 5);
   boss = {
     x: W / 2, y: -140, targetY: 120, w: INV_W * 3, h: INV_H * 3,
     hp, maxHp: hp, t: 0, atk: 2.4, pattern: 0, flash: 0,
     entering: true, dying: 0, burst: 0, burstTimer: 0, boomTimer: 0, dead: false,
+    // Nivel 2: suelta escoltas · Nivel 3+: además dispara el rayo láser
+    level, escort: 4,
+    name: BOSS_NAMES[Math.min(level, 3) - 1] + (level > 3 ? ' +' + (level - 3) : ''),
   };
 }
 
@@ -529,9 +691,10 @@ function updateBoss(dt) {
       addShake(4);
     }
     if (b.dying <= 0) {
+      b.dead = true;
       explode(b.x, b.y, '#ff3b5c', 90, 480);
       explode(b.x, b.y, '#ffd23f', 50, 300);
-      Sound.big(); addShake(16); flashScreen = 0.35;
+      Sound.big(); addShake(16); flash(0.35);
       vibrate([200, 80, 200]);
       const pts = 5000 * Math.ceil(wave / 5);
       addScore(pts);
@@ -553,6 +716,15 @@ function updateBoss(dt) {
   b.y = b.targetY + Math.sin(b.t * 1.3) * 18;
   if (!player.alive) return;
 
+  if (b.level >= 2) {
+    b.escort -= dt;
+    if (b.escort <= 0) {
+      b.escort = enraged ? 4 : 5.5;
+      spawnMinis(b.x, b.y + b.h / 2 - 10, 2);
+      Sound.ufo();
+    }
+  }
+
   if (b.burst > 0) {
     b.burstTimer -= dt;
     if (b.burstTimer <= 0) { b.burst--; b.burstTimer = 0.09; bossShot(b.x, b.y + b.h / 2, Math.atan2(player.y - b.y, player.x - b.x), 360); }
@@ -561,8 +733,11 @@ function updateBoss(dt) {
   b.atk -= dt;
   if (b.atk <= 0) {
     b.atk = Math.max(0.9, 2.1 - wave * 0.04) * (enraged ? 0.7 : 1);
-    const p = b.pattern++ % 3;
-    if (p === 0) {
+    const p = b.pattern++ % (b.level >= 3 ? 4 : 3);
+    if (p === 3) {
+      // Rayo con aviso, apuntado a donde está el jugador ahora
+      startLaser({ owner: b, x: player.x, y: b.y + b.h / 2 });
+    } else if (p === 0) {
       const n = enraged ? 20 : 14;
       for (let i = 0; i < n; i++) bossShot(b.x, b.y, (i / n) * TAU + b.t, 190);
     } else if (p === 1) {
@@ -716,7 +891,8 @@ function floatText(x, y, str, color = '#fff', size = 12) {
   texts.push({ x, y, str, color, size, life: 1.1, max: 1.1, dead: false });
 }
 
-function addShake(n) { shake = Math.min(shake + n, 22); }
+function addShake(n) { if (settings.get('shake')) shake = Math.min(shake + n, 22); }
+function flash(v) { if (settings.get('flashes')) flashScreen = Math.max(flashScreen, v); }
 
 function updateParticles(dt) {
   for (const p of particles) {
@@ -791,10 +967,11 @@ function playerBox() {
 
 function updatePlayer(dt) {
   if (!player.alive) return;
-  const target = input.axis * PLAYER_SPEED;
+  const speedMax = PLAYER_SPEED * (1 + 0.12 * upgrades.speed);
+  const target = input.axis * speedMax;
   player.vx = lerp(player.vx, target, 1 - Math.pow(0.00002, dt));
   player.x = clamp(player.x + player.vx * dt, player.w / 2 + 6, W - player.w / 2 - 6);
-  player.tilt = lerp(player.tilt, (player.vx / PLAYER_SPEED) * 0.28, Math.min(1, dt * 12));
+  player.tilt = lerp(player.tilt, (player.vx / speedMax) * 0.28, Math.min(1, dt * 12));
   player.cooldown -= dt;
   player.invuln = Math.max(0, player.invuln - dt);
   player.triple = Math.max(0, player.triple - dt);
@@ -811,12 +988,17 @@ function updatePlayer(dt) {
 }
 
 function fire() {
-  player.cooldown = player.rapid > 0 ? 0.09 : 0.24;
-  const angles = player.triple > 0 ? [-0.17, 0, 0.17] : [0];
-  for (const a of angles) {
+  player.cooldown = (player.rapid > 0 ? 0.09 : 0.24) * Math.pow(0.85, upgrades.rate);
+  const shots = [];
+  // Cañón doble: dos disparos paralelos en el centro
+  if (upgrades.twin) shots.push([0, -7], [0, 7]);
+  else shots.push([0, 0]);
+  if (player.triple > 0) shots.push([-0.17, 0], [0.17, 0]);
+  for (const [a, dx] of shots) {
     bullets.push({
-      x: player.x - 2, y: player.y - player.h / 2, w: 4, h: 16,
-      vx: Math.sin(a) * BULLET_SPEED, vy: -Math.cos(a) * BULLET_SPEED, dead: false,
+      x: player.x - 2 + dx, y: player.y - player.h / 2, w: 4, h: 16,
+      vx: Math.sin(a) * BULLET_SPEED, vy: -Math.cos(a) * BULLET_SPEED,
+      pierce: upgrades.pierce, hits: [], dead: false,
     });
     stats.shots++;
   }
@@ -843,7 +1025,7 @@ function hitPlayer(force = false) {
   explode(player.x, player.y, '#ff7b2e', 40, 240);
   Sound.hurt();
   vibrate([90, 40, 140]);
-  addShake(14); hitStop = 0.08; flashScreen = 0.25;
+  addShake(14); hitStop = 0.08; flash(0.25);
   if (!force) lives--;
   player.alive = false;
   deathTimer = 1.6;
@@ -923,6 +1105,38 @@ function openDailyPanel(day = todayUTC()) {
   });
 }
 
+function openUpgradeChoice() {
+  const options = offerUpgrades(upgrades, R.upgrade, { canAddLife: lives < MAX_LIVES });
+  if (!options.length) { startWave(wave + 1); return; }
+  state = 'upgrade';
+  input.keys.clear();
+  ui.openUpgrade({
+    wave,
+    options,
+    levels: upgrades,
+    onPick: (id) => {
+      applyUpgrade(id);
+      state = 'playing';
+      startWave(wave + 1);
+    },
+  });
+}
+
+function applyUpgrade(id) {
+  upgrades[id]++;
+  if (id === 'life') lives = Math.min(lives + 1, MAX_LIVES);
+  const u = UPGRADES.find((x) => x.id === id);
+  floatText(player.x, player.y - 50, u.name, '#ffd23f', 11);
+  Sound.power();
+}
+
+function openOptionsFromGame() {
+  if (ui.isOpen()) return;
+  if (state === 'playing') togglePause();
+  input.keys.clear();
+  ui.openOptions();
+}
+
 function openRankingFromGame(scope) {
   if (!online.enabled || ui.isOpen()) return;
   if (state === 'playing') togglePause();
@@ -965,10 +1179,12 @@ function dropPower(x, y, forced = false) {
   powerups.push({ x: x - 13, y, w: 26, h: 26, vy: 110, type, t: 0, dead: false });
 }
 
+const powerTime = () => POWER_TIME * (1 + 0.5 * upgrades.duration);
+
 function collectPower(p) {
   const info = POWERS[p.type];
-  if (p.type === 'T') player.triple = POWER_TIME;
-  if (p.type === 'R') player.rapid = POWER_TIME;
+  if (p.type === 'T') player.triple = powerTime();
+  if (p.type === 'R') player.rapid = powerTime();
   if (p.type === 'S') player.shield = true;
   if (p.type === 'L') lives = Math.min(lives + 1, MAX_LIVES);
   floatText(player.x, player.y - 46, info.name, info.color, 12);
@@ -991,6 +1207,7 @@ function killInvader(inv) {
   Sound.explode();
   addShake(2.5);
   dropPower(cx, cy);
+  if (inv.kind === 'splitter') spawnMinis(cx, inv.y + 6, 2);
 }
 
 // ------------------------------------------------------------------
@@ -1013,11 +1230,14 @@ function collisions() {
     if (hitBunkers(b, false)) { b.dead = true; continue; }
 
     for (const inv of invaders) {
-      if (inv.dead || !overlap(b, inv)) continue;
-      b.dead = true; stats.hits++;
+      if (inv.dead || b.hits.includes(inv) || !overlap(b, inv)) continue;
+      stats.hits++;
       inv.hp--;
       if (inv.hp <= 0) killInvader(inv);
       else { inv.flash = 0.08; Sound.bossHit(); spawn({ x: b.x, y: b.y, vx: 0, vy: 0, life: 0.1, size: 18, color: '#fff', type: 'flash', drag: 1 }); }
+      // Perforante: el disparo sigue hasta agotar los enemigos que puede atravesar
+      if (b.pierce > 0) { b.pierce--; b.hits.push(inv); continue; }
+      b.dead = true;
       break;
     }
     if (b.dead) continue;
@@ -1095,12 +1315,22 @@ function update(dt) {
   }
   for (const p of powerups) {
     p.t += dt; p.y += p.vy * dt;
+    if (upgrades.magnet && player.alive) {
+      const dx = player.x - (p.x + p.w / 2);
+      p.x += Math.sign(dx) * Math.min(Math.abs(dx), 300 * dt);
+      p.vy = 170;
+    }
     if (p.y > H) p.dead = true;
   }
 
-  if (boss) updateBoss(dt);
-  else updateFormation(dt);
+  if (boss) {
+    updateBoss(dt);
+    for (const inv of invaders) moveInvader(inv, dt); // escoltas del jefe
+  } else {
+    updateFormation(dt);
+  }
   if (state !== 'playing') return;
+  updateLasers(dt);
   updateUfo(dt);
   collisions();
 
@@ -1117,7 +1347,10 @@ function update(dt) {
   }
   if (clearTimer > 0) {
     clearTimer -= dt;
-    if (clearTimer <= 0) startWave(wave + 1);
+    if (clearTimer <= 0) {
+      if (upgradeDue(wave, cfg.boss)) openUpgradeChoice();
+      else startWave(wave + 1);
+    }
   }
 }
 
@@ -1178,7 +1411,7 @@ function drawInvaders() {
     const spr = inv.flash > 0 ? SPR.invFlash : SPR.inv[inv.type];
     if (!spr) continue;
     // Pequeño "squash" alternado para simular animación de 2 frames
-    const sq = 1 + (Math.floor(time * 3 + inv.col) % 2 ? 0.06 : -0.04);
+    const sq = 1 + (Math.floor(time * 3 + (inv.col ?? inv.wob)) % 2 ? 0.06 : -0.04);
     const w = inv.w * sq, h = inv.h / sq;
     ctx.drawImage(spr, inv.x + (inv.w - w) / 2, inv.y + (inv.h - h) / 2, w, h);
     if (inv.hp > 1 && inv.flash <= 0) {
@@ -1208,7 +1441,7 @@ function drawBoss() {
   ctx.fillRect(bx, by, bw, 8);
   ctx.fillStyle = b.hp < b.maxHp * 0.5 ? '#ffd23f' : '#ff3b5c';
   ctx.fillRect(bx, by, (bw * Math.max(0, b.hp)) / b.maxHp, 8);
-  drawText('MOTHERSHIP', W / 2, by - 10, { size: 8, color: '#ff8aa0' });
+  drawText(b.name, W / 2, by - 10, { size: 8, color: '#ff8aa0' });
 }
 
 function drawUfo() {
@@ -1302,11 +1535,14 @@ function drawHUD() {
   drawText(modeTag + 'WAVE ' + wave, W / 2, 38, { size: 9, color: mode === 'daily' ? '#ffd23f' : '#5dc1b9' });
 
   for (let i = 0; i < lives; i++) drawShipIcon(16 + i * 34, H - 26, 0.32);
+  const owned = UPGRADES.filter((u) => upgrades[u.id] > 0 && u.id !== 'life')
+    .map((u) => u.icon + (upgrades[u.id] > 1 ? upgrades[u.id] : ''));
+  if (owned.length) drawText(owned.join(' '), 16, H - 44, { size: 12, align: 'left', alpha: 0.85 });
 
   let px = W - 20;
   const bars = [];
-  if (player.triple > 0) bars.push(['TRIPLE', player.triple / POWER_TIME, POWERS.T.color]);
-  if (player.rapid > 0) bars.push(['RAPID', player.rapid / POWER_TIME, POWERS.R.color]);
+  if (player.triple > 0) bars.push(['TRIPLE', player.triple / powerTime(), POWERS.T.color]);
+  if (player.rapid > 0) bars.push(['RAPID', player.rapid / powerTime(), POWERS.R.color]);
   if (player.shield) bars.push(['SHIELD', 1, POWERS.S.color]);
   for (const [name, f, col] of bars) {
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
@@ -1336,6 +1572,7 @@ function drawWorld() {
   drawUfo();
   drawPowerups();
   drawBullets();
+  drawLasers();
   drawPlayer();
   drawParticles();
   ctx.restore();
@@ -1364,7 +1601,7 @@ function drawMenu() {
 
   // Tabla de puntos
   const ty = 300;
-  INV_TYPES.forEach((t, i) => {
+  INV_TYPES.slice(0, 3).forEach((t, i) => {
     const cx = W / 2 - 330 + i * 190;
     if (SPR.inv[i]) ctx.drawImage(SPR.inv[i], cx - 50, ty - 20);
     drawText('= ' + t.points, cx - 10, ty, { size: 11, color: t.color, align: 'left' });
@@ -1378,7 +1615,7 @@ function drawMenu() {
     const label = (isTouch() ? '🏆' : 'R') + ' = RANKING ONLINE' + (lg ? '  ·  LIGA ' + lg.name.toUpperCase() : '');
     drawText(label, W / 2, 470, { size: 9, color: '#ffd23f' });
   }
-  drawText('MOVE < > / A D     FIRE SPACE     PAUSE P     MUTE M', W / 2, 500, { size: 9, color: '#8a86b8' });
+  drawText('MOVE < > / A D    FIRE SPACE    PAUSE P    MUTE M    OPTIONS O', W / 2, 500, { size: 9, color: '#8a86b8' });
   drawText('GAMEPAD SUPPORTED', W / 2, 522, { size: 8, color: '#5a5688' });
   if (iosHint) {
     drawText('IPHONE: SHARE > ADD TO HOME SCREEN TO INSTALL', W / 2, 548, { size: 7, color: '#5dc1b9' });
@@ -1474,7 +1711,7 @@ function render() {
     ctx.fillStyle = `rgba(255,255,255,${flashScreen})`;
     ctx.fillRect(0, 0, W, H);
   }
-  ctx.drawImage(overlayCanvas, 0, 0);
+  if (settings.get('crt')) ctx.drawImage(overlayCanvas, 0, 0);
 }
 
 // ------------------------------------------------------------------
@@ -1569,6 +1806,22 @@ if (TEST_MODE) {
     get frameCount() { return frameCount; },
     get bunkerCells() { return bunkers.reduce((n, b) => n + b.cells.reduce((a, c) => a + c, 0), 0); },
     setPlayerX(x) { if (player) { player.x = x; player.vx = 0; } },
+    get upgrades() { return { ...upgrades }; },
+    get kinds() { return invaders.reduce((acc, i) => ((acc[i.kind] = (acc[i.kind] || 0) + 1), acc), {}); },
+    get lasers() { return lasers.map((L) => ({ firing: L.firing, x: L.x, end: L.end })); },
+    get bossInfo() { return boss ? { level: boss.level, name: boss.name } : null; },
+    killKind(kind) {
+      cheated = true;
+      const inv = invaders.find((i) => i.kind === kind && !i.dead);
+      if (inv) killInvader(inv);
+      return !!inv;
+    },
+    laserAt(x, y = 120) {
+      cheated = true;
+      if (player) { player.x = x; player.vx = 0; player.invuln = 0; player.shield = false; }
+      startLaser({ x, y });
+    },
+    freeze() { cheated = true; invaders.forEach((i) => (i.dead = true)); enemyBullets.length = 0; },
     get cheated() { return cheated; },
     skipTo(n) { if (state === 'playing') { cheated = true; startWave(n); } },
     killAll() {

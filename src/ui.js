@@ -5,6 +5,8 @@ import {
   NAME_RE, LEAGUE_NAME_RE, LEAGUE_CODE_RE,
 } from './online.js';
 import { formatDay, gridText, shareText, dailyLink } from './daily.js';
+import { settings } from './settings.js';
+import { canVibrate } from './platform.js';
 
 const fmt = (n) => Number(n).toLocaleString('es-AR');
 
@@ -35,10 +37,11 @@ document.body.append(root, toastEl);
 let onCloseCb = null;
 let lastFocus = null;
 
-function open(content, { onClose } = {}) {
+function open(content, { onClose, locked = false } = {}) {
   if (root.hidden) lastFocus = document.activeElement;
   root.replaceChildren(content);
   root.hidden = false;
+  root.dataset.locked = locked ? '1' : '';
   onCloseCb = onClose || null;
   // En celular no se enfoca un campo de texto solo: abriría el teclado y taparía todo
   let target = content.querySelector('[data-autofocus]');
@@ -51,6 +54,7 @@ const coarsePointer = () => window.matchMedia && window.matchMedia('(pointer: co
 function close() {
   if (root.hidden) return;
   root.hidden = true;
+  root.dataset.locked = '';
   root.replaceChildren();
   const cb = onCloseCb;
   onCloseCb = null;
@@ -58,12 +62,14 @@ function close() {
   if (cb) cb();
 }
 
+const isLocked = () => root.dataset.locked === '1';
+
 root.addEventListener('pointerdown', (e) => {
-  if (e.target === root) close();
+  if (e.target === root && !isLocked()) close();
 });
 document.addEventListener('keydown', (e) => {
   if (root.hidden) return;
-  if (e.key === 'Escape') {
+  if (e.key === 'Escape' && !isLocked()) {
     e.preventDefault();
     close();
   }
@@ -493,6 +499,124 @@ function openDaily({ day, record, onPlay, onPractice, onClose }) {
 }
 
 // ---------------------------------------------------------------------
+// Elegir una mejora entre oleadas (no se puede cerrar sin elegir)
+// ---------------------------------------------------------------------
+const PICK_DELAY_MS = 650; // evita elegir sin querer si se venía apretando Espacio
+
+function openUpgrade({ wave, options, levels, onPick }) {
+  let picked = false;
+  const cards = options.map((u, i) =>
+    h(
+      'button',
+      {
+        class: 'card',
+        disabled: true,
+        onclick: () => {
+          if (picked) return;
+          picked = true;
+          onCloseCb = null;
+          close();
+          onPick(u.id);
+        },
+      },
+      h('span', { class: 'key', 'aria-hidden': 'true', text: String(i + 1) }),
+      h('span', { class: 'icon', 'aria-hidden': 'true', text: u.icon }),
+      h('b', { text: u.name }),
+      h('small', { text: u.desc }),
+      Number.isFinite(u.max) && u.max > 1 && h('span', { class: 'lvl', text: `NIVEL ${levels[u.id] + 1} DE ${u.max}` }),
+    ),
+  );
+  const section = h(
+    'section',
+    { class: 'panel wide', tabindex: '-1', 'aria-label': 'Elegí una mejora' },
+    h('header', { class: 'center' }, h('h2', { text: `OLEADA ${wave} SUPERADA` })),
+    h('p', { class: 'muted', text: 'Elegí una mejora para el resto de la partida' }),
+    h('div', { class: 'cards' }, cards),
+  );
+  section.addEventListener('keydown', (e) => {
+    if (cards[0].disabled || e.repeat) return;
+    const n = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
+    const np = ['Numpad1', 'Numpad2', 'Numpad3'].indexOf(e.code);
+    const i = Math.max(n, np);
+    if (i >= 0 && cards[i]) {
+      e.preventDefault();
+      cards[i].click();
+      return;
+    }
+    const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+    if (step) {
+      e.preventDefault();
+      const at = cards.indexOf(document.activeElement);
+      cards[(Math.max(at, 0) + step + cards.length) % cards.length].focus();
+    }
+  });
+  open(section, { locked: true });
+  setTimeout(() => {
+    if (picked || !section.isConnected) return;
+    cards.forEach((c) => (c.disabled = false));
+    if (!coarsePointer()) cards[0].focus({ preventScroll: true });
+  }, PICK_DELAY_MS);
+}
+
+// Navegación con mando en cualquier pantalla abierta
+function gamepad({ prev, next, accept, back }) {
+  if (root.hidden) return;
+  const items = [...root.querySelectorAll('button:not([disabled]), input')].filter((el) => el.offsetParent !== null);
+  if (!items.length) return;
+  const at = items.indexOf(document.activeElement);
+  if (prev || next) items[(Math.max(at, 0) + (next ? 1 : -1) + items.length) % items.length].focus();
+  else if (accept && at >= 0 && items[at].tagName === 'BUTTON') items[at].click();
+  else if (accept && at < 0) items[0].focus();
+  if (back && !isLocked()) close();
+}
+
+// ---------------------------------------------------------------------
+// Opciones
+// ---------------------------------------------------------------------
+function openOptions({ onClose } = {}) {
+  const s = settings.all();
+  const vol = h('input', {
+    type: 'range', id: 'optVolume', min: '0', max: '100', step: '10', value: String(s.volume), 'aria-label': 'Volumen',
+  });
+  const volOut = h('output', { for: 'optVolume', text: `${s.volume}%` });
+  vol.addEventListener('input', () => {
+    settings.set('volume', Number(vol.value));
+    volOut.textContent = `${vol.value}%`;
+  });
+
+  const toggle = (key, label, hint) => {
+    const id = `opt-${key}`;
+    const cb = h('input', { type: 'checkbox', id, role: 'switch' });
+    cb.checked = Boolean(s[key]);
+    cb.addEventListener('change', () => settings.set(key, cb.checked));
+    return h('label', { class: 'opt', for: id }, h('span', {}, h('b', { text: label }), hint && h('small', { text: hint })), cb);
+  };
+
+  const pnl = panel(
+      'OPCIONES',
+      h(
+        'div',
+        { class: 'opts' },
+        h('label', { class: 'opt', for: 'optVolume' }, h('span', {}, h('b', { text: 'VOLUMEN' })), h('span', { class: 'range' }, vol, volOut)),
+        toggle('shake', 'TEMBLOR DE PANTALLA'),
+        toggle('flashes', 'DESTELLOS', 'Apagalos si te molestan las luces que parpadean'),
+        toggle('crt', 'EFECTO TV RETRO'),
+        canVibrate() && toggle('vibration', 'VIBRACIÓN'),
+        toggle('bigTouch', 'BOTONES TÁCTILES GRANDES'),
+        toggle('leftHanded', 'MODO ZURDO', 'FIRE a la izquierda, flechas a la derecha'),
+      ),
+      h(
+        'footer',
+        {},
+        h('button', { class: 'btn ghost', onclick: () => { settings.reset(); openOptions({ onClose }); }, text: 'RESTABLECER' }),
+        h('button', { class: 'btn', onclick: close, text: 'LISTO' }),
+      ),
+  );
+  pnl.classList.add('options');
+  open(pnl, { onClose });
+}
+
+// ---------------------------------------------------------------------
 // Link de invitación: ?liga=CODIGO
 // ---------------------------------------------------------------------
 async function handleInvite() {
@@ -526,5 +650,8 @@ export const ui = {
   openLeagues,
   openDaily,
   shareDaily,
+  openOptions,
+  openUpgrade,
+  gamepad,
   handleInvite,
 };

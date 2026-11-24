@@ -61,6 +61,9 @@ test.describe('juego', () => {
     expect(boss.hp).toBeGreaterThan(50);
     await page.waitForTimeout(500);
     await game(page, 'killAll()');
+    // Después del jefe se elige una mejora
+    await waitForState(page, 'upgrade', 10_000);
+    await page.locator('.card').first().click();
     await waitForWave(page, 6, 10_000);
     expect(errors).toEqual([]);
   });

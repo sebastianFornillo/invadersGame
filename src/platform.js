@@ -1,11 +1,11 @@
 // Integración con el dispositivo: app instalable (PWA), vibración,
 // pantalla completa y orientación horizontal.
-import { store } from './storage.js';
+import { settings } from './settings.js';
 
-const vibration = { enabled: store.get('invaders.vibrate', true) };
+export const canVibrate = () => typeof navigator.vibrate === 'function';
 
 export function vibrate(pattern) {
-  if (!vibration.enabled || !navigator.vibrate) return;
+  if (!settings.get('vibration') || !canVibrate()) return;
   try {
     navigator.vibrate(pattern);
   } catch {
@@ -13,10 +13,6 @@ export function vibrate(pattern) {
   }
 }
 
-export function setVibration(on) {
-  vibration.enabled = on;
-  store.set('invaders.vibrate', on);
-}
 
 export const isStandalone = () =>
   window.matchMedia('(display-mode: standalone)').matches ||

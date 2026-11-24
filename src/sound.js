@@ -1,5 +1,8 @@
 // Sonido sintetizado con WebAudio: no hay archivos de audio que descargar.
 import { store } from './storage.js';
+import { settings } from './settings.js';
+
+const BASE_GAIN = 0.35;
 
 let ac = null;
 let master = null;
@@ -12,7 +15,7 @@ function ensure() {
     if (!AC) return null;
     ac = new AC();
     master = ac.createGain();
-    master.gain.value = 0.35;
+    master.gain.value = (BASE_GAIN * settings.get('volume')) / 100;
     master.connect(ac.destination);
     noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
     const d = noiseBuf.getChannelData(0);
@@ -60,6 +63,10 @@ function noise({ d = 0.3, v = 0.3, f = 1800, f2 = 200, delay = 0 }) {
 const seq = (notes, step, opts) =>
   notes.forEach((f, i) => tone({ f, delay: i * step, ...opts }));
 
+settings.onChange((s) => {
+  if (master) master.gain.value = (BASE_GAIN * s.volume) / 100;
+});
+
 export const Sound = {
   unlock: ensure,
   get muted() {
@@ -96,4 +103,9 @@ export const Sound = {
     ),
   clear: () => seq([392, 523, 659, 784, 1047], 0.07, { d: 0.12, type: 'triangle', v: 0.16 }),
   over: () => seq([392, 330, 262, 196], 0.22, { d: 0.25, v: 0.12 }),
+  laserCharge: () => tone({ f: 180, f2: 900, d: 0.8, type: 'sawtooth', v: 0.05 }),
+  laserFire: () => {
+    noise({ d: 0.45, v: 0.3, f: 3000, f2: 400 });
+    tone({ f: 120, f2: 60, d: 0.45, type: 'square', v: 0.1 });
+  },
 };
