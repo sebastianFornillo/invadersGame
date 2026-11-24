@@ -651,9 +651,9 @@ function hitBunkers(rect, down) {
 }
 
 function erode(b, cc, cr, radius) {
-  const R = Math.ceil(radius);
-  for (let r = cr - R; r <= cr + R; r++) {
-    for (let c = cc - R; c <= cc + R; c++) {
+  const span = Math.ceil(radius);
+  for (let r = cr - span; r <= cr + span; r++) {
+    for (let c = cc - span; c <= cc + span; c++) {
       if (r < 0 || c < 0 || r >= BK_ROWS || c >= BK_COLS) continue;
       const d = Math.hypot(c - cc, r - cr);
       if (d <= radius && (d < 1.2 || R.bunker() < 0.65)) b.cells[r * BK_COLS + c] = 0;
@@ -1527,7 +1527,11 @@ function togglePause() {
 // Loop
 // ------------------------------------------------------------------
 let last = performance.now();
+let frameCount = 0;
 function frame(now) {
+  // Se agenda el próximo cuadro antes que nada: si algo falla, el juego no se congela
+  requestAnimationFrame(frame);
+  frameCount++;
   let dt = Math.min((now - last) / 1000, 1 / 30);
   last = now;
   pollGamepad();
@@ -1541,7 +1545,6 @@ function frame(now) {
     stateTime += dt;
   }
   render();
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
@@ -1563,6 +1566,9 @@ if (TEST_MODE) {
     get menuSel() { return menuSel; },
     get waveLog() { return waveLog.slice(); },
     seedSample() { return [R.fire(), R.dive(), R.ufo(), R.drop(), R.bunker()]; },
+    get frameCount() { return frameCount; },
+    get bunkerCells() { return bunkers.reduce((n, b) => n + b.cells.reduce((a, c) => a + c, 0), 0); },
+    setPlayerX(x) { if (player) { player.x = x; player.vx = 0; } },
     get cheated() { return cheated; },
     skipTo(n) { if (state === 'playing') { cheated = true; startWave(n); } },
     killAll() {

@@ -18,6 +18,8 @@ export default [
       eqeqeq: ['error', 'smart'],
       // Detecta usar una variable let/const antes de declararla (error en tiempo de carga)
       'no-use-before-define': ['error', { functions: false, classes: true, variables: false }],
+      // Detecta variables locales que tapan a otras (así se rompió el azar de los búnkers)
+      'no-shadow': ['error', { builtinGlobals: false, hoist: 'functions' }],
     },
   },
   {

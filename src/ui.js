@@ -35,15 +35,15 @@ document.body.append(root, toastEl);
 let onCloseCb = null;
 let lastFocus = null;
 
-function open(panel, { onClose } = {}) {
+function open(content, { onClose } = {}) {
   if (root.hidden) lastFocus = document.activeElement;
-  root.replaceChildren(panel);
+  root.replaceChildren(content);
   root.hidden = false;
   onCloseCb = onClose || null;
   // En celular no se enfoca un campo de texto solo: abriría el teclado y taparía todo
-  let target = panel.querySelector('[data-autofocus]');
+  let target = content.querySelector('[data-autofocus]');
   if (target && target.tagName === 'INPUT' && coarsePointer()) target = null;
-  (target || panel).focus({ preventScroll: true });
+  (target || content).focus({ preventScroll: true });
 }
 
 const coarsePointer = () => window.matchMedia && window.matchMedia('(pointer: coarse)').matches;

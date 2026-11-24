@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { openGame, game, waitForState } from './helpers.js';
 
 test('celular: se ven los controles táctiles y FIRE inicia la partida', async ({ page }) => {
