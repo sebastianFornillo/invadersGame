@@ -1,0 +1,24 @@
+{
+  "name": "invaders-space",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Shooter arcade retro inspirado en Space Invaders, en JavaScript puro.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "python3 -m http.server 4173 --bind 127.0.0.1",
+    "build": "node scripts/build.mjs",
+    "preview": "npm run build && python3 -m http.server 4173 --bind 127.0.0.1 --directory dist",
+    "lint": "eslint .",
+    "test": "playwright test",
+    "check": "npm run lint && npm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@playwright/test": "1.63.0",
+    "eslint": "9.39.1",
+    "globals": "16.5.0"
+  }
+}

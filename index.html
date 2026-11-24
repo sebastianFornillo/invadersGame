@@ -3,11 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#05010f">
     <title>Invaders Space</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <meta name="description" content="Shooter arcade retro: oleadas, jefes, power-ups y récords. Jugá gratis en el navegador o instalalo en tu celular.">
+    <meta name="theme-color" content="#05010f">
+
+    <!-- App instalable (PWA) -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Invaders">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- Vista previa al compartir el link (WhatsApp, redes) -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Invaders Space">
+    <meta property="og:description" content="¿Cuántas oleadas aguantás? Shooter arcade retro gratis, en el navegador o el celular.">
+    <meta property="og:url" content="https://sebastianfornillo.github.io/invadersGame/">
+    <meta property="og:image" content="https://sebastianfornillo.github.io/invadersGame/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <link rel="preload" href="assets/fonts/press-start-2p-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -16,6 +35,8 @@
     </main>
 
     <div class="hud-buttons">
+        <button id="installBtn" aria-label="Instalar como app" hidden>⤓</button>
+        <button id="fsBtn" aria-label="Pantalla completa">⛶</button>
         <button id="muteBtn" aria-label="Silenciar">♪</button>
         <button id="pauseBtn" aria-label="Pausa">II</button>
     </div>
@@ -30,6 +51,7 @@
 
     <p class="rotate-hint">Girá el teléfono para jugar ↻</p>
 
-    <script src="game.js"></script>
+    <noscript><p class="noscript">Invaders Space necesita JavaScript activado.</p></noscript>
+    <script type="module" src="src/game.js"></script>
 </body>
 </html>
