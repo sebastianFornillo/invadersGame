@@ -1,6 +1,6 @@
 // Prueba de punta a punta contra Postgres real (con supabase/schema.sql cargado).
 // Se ejecuta sólo si existe DATABASE_URL (en CI siempre).
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { openGame, game, waitForState, useConfig, playUntilScore } from './helpers.js';
 import { startRestServer, TEST_KEY } from './support/rest-server.js';
 

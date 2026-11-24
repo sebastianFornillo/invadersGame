@@ -291,3 +291,4 @@ html, body {
     .panel { animation: panel-in 0.18s ease-out; }
     @keyframes panel-in { from { transform: translateY(8px) scale(0.98); opacity: 0; } }
 }
+.panel .grid { font-size: 22px; letter-spacing: 2px; line-height: 1.4; margin: 8px 0; overflow-wrap: anywhere; }

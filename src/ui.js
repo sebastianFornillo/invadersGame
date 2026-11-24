@@ -4,6 +4,7 @@ import {
   api, online, league, playerName, inviteLink, cleanName,
   NAME_RE, LEAGUE_NAME_RE, LEAGUE_CODE_RE,
 } from './online.js';
+import { formatDay, gridText, shareText, dailyLink } from './daily.js';
 
 const fmt = (n) => Number(n).toLocaleString('es-AR');
 
@@ -34,15 +35,15 @@ document.body.append(root, toastEl);
 let onCloseCb = null;
 let lastFocus = null;
 
-function open(panel, { onClose } = {}) {
+function open(content, { onClose } = {}) {
   if (root.hidden) lastFocus = document.activeElement;
-  root.replaceChildren(panel);
+  root.replaceChildren(content);
   root.hidden = false;
   onCloseCb = onClose || null;
   // En celular no se enfoca un campo de texto solo: abriría el teclado y taparía todo
-  let target = panel.querySelector('[data-autofocus]');
+  let target = content.querySelector('[data-autofocus]');
   if (target && target.tagName === 'INPUT' && coarsePointer()) target = null;
-  (target || panel).focus({ preventScroll: true });
+  (target || content).focus({ preventScroll: true });
 }
 
 const coarsePointer = () => window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
@@ -95,6 +96,7 @@ const friendly = (e) => (e && e.message) || 'Algo salió mal, probá de nuevo';
 const SCOPES = [
   { id: 'global', label: 'MUNDIAL' },
   { id: 'week', label: 'SEMANA' },
+  { id: 'daily', label: 'HOY' },
   { id: 'league', label: 'LIGA', needsLeague: true },
 ];
 
@@ -172,7 +174,9 @@ function openRanking({ scope = 'global', onClose } = {}) {
 // ---------------------------------------------------------------------
 // Guardar puntaje al terminar la partida
 // ---------------------------------------------------------------------
-function openSubmit({ score, wave, title = 'GUARDAR PUNTAJE', submit, scope = 'global', onPlayAgain, onClose }) {
+function openSubmit({
+  score, wave, title = 'GUARDAR PUNTAJE', submit, scope = 'global', onPlayAgain, extraActions = [], onClose,
+}) {
   const lg = league.get();
   const input = h('input', {
     id: 'playerName',
@@ -233,6 +237,7 @@ function openSubmit({ score, wave, title = 'GUARDAR PUNTAJE', submit, scope = 'g
         h(
           'footer',
           {},
+          ...extraActions.map((a) => h('button', { class: 'btn ghost', onclick: a.onClick, text: a.label })),
           h('button', { class: 'btn ghost', onclick: () => openRanking({ scope, onClose }), text: 'VER RANKING' }),
           onPlayAgain &&
             h('button', {
@@ -402,6 +407,92 @@ function openLeagues({ onClose } = {}) {
 }
 
 // ---------------------------------------------------------------------
+// Desafío diario
+// ---------------------------------------------------------------------
+async function shareDaily(result) {
+  const text = shareText({ ...result, url: dailyLink() });
+  if (navigator.share) {
+    try {
+      await navigator.share({ text });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Resultado copiado: pegalo en WhatsApp');
+  } catch {
+    toast(text.replace(/\n/g, ' · '), 9000);
+  }
+}
+
+// Hora local en la que cambia el desafío (00:00 UTC)
+function nextChangeTime() {
+  const n = new Date();
+  const next = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1));
+  return next.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function openDaily({ day, record, onPlay, onPractice, onClose }) {
+  const rankingBtn =
+    online.enabled && h('button', { class: 'btn ghost', onclick: () => openRanking({ scope: 'daily', onClose }), text: 'RANKING DE HOY' });
+  const practiceBtn = h('button', { class: 'btn ghost', onclick: () => { onCloseCb = null; close(); onPractice(); }, text: 'PRÁCTICA' });
+
+  if (!record) {
+    open(
+      panel(
+        'DESAFÍO DIARIO',
+        h('p', { class: 'big', text: formatDay(day) }),
+        h('p', { class: 'muted', text: 'Las mismas oleadas para todos. Tenés un solo intento oficial por día.' }),
+        h('p', { class: 'muted small', text: `El desafío cambia todos los días a las ${nextChangeTime()}.` }),
+        h(
+          'footer',
+          {},
+          h('button', { class: 'btn', 'data-autofocus': true, onclick: () => { onCloseCb = null; close(); onPlay(); }, text: 'JUGAR' }),
+          rankingBtn,
+        ),
+      ),
+      { onClose },
+    );
+    return;
+  }
+
+  if (record.status !== 'done') {
+    open(
+      panel(
+        'DESAFÍO DIARIO',
+        h('p', { class: 'big', text: formatDay(day) }),
+        h('p', { class: 'muted', text: 'Ya usaste el intento de hoy: la partida quedó sin terminar.' }),
+        h('p', { class: 'muted small', text: `Volvé a las ${nextChangeTime()} para el próximo desafío.` }),
+        h('footer', {}, practiceBtn, rankingBtn),
+      ),
+      { onClose },
+    );
+    return;
+  }
+
+  const result = { day, score: record.score, wave: record.wave, grid: record.grid || [] };
+  open(
+    panel(
+      `DESAFÍO ${formatDay(day)}`,
+      h('p', { class: 'big', text: `${fmt(record.score)} PTS` }),
+      h('p', { class: 'muted', text: `Oleada ${record.wave}${record.rank ? ` · #${record.rank} de ${fmt(record.players)}` : ''}` }),
+      h('p', { class: 'grid', text: gridText(result.grid) }),
+      h('p', { class: 'muted small', text: `Próximo desafío a las ${nextChangeTime()}.` }),
+      h(
+        'footer',
+        {},
+        h('button', { class: 'btn', 'data-autofocus': true, onclick: () => shareDaily(result), text: 'COMPARTIR' }),
+        rankingBtn,
+        practiceBtn,
+      ),
+    ),
+    { onClose },
+  );
+}
+
+// ---------------------------------------------------------------------
 // Link de invitación: ?liga=CODIGO
 // ---------------------------------------------------------------------
 async function handleInvite() {
@@ -433,5 +524,7 @@ export const ui = {
   openRanking,
   openSubmit,
   openLeagues,
+  openDaily,
+  shareDaily,
   handleInvite,
 };

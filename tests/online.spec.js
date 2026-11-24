@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { openGame, game, waitForState, mockOnline, useConfig, playUntilScore } from './helpers.js';
 
 const panel = (page) => page.locator('.overlay .panel');

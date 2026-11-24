@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test.describe('app instalable (PWA)', () => {
   test('el manifest es válido y sus íconos existen', async ({ request }) => {

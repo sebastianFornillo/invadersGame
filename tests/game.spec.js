@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { openGame, game, waitForState, waitForWave } from './helpers.js';
 
 test.describe('juego', () => {
@@ -78,6 +78,23 @@ test.describe('juego', () => {
     await page.keyboard.press('Enter');
     await waitForState(page, 'playing');
     expect(await game(page, 'score')).toBe(0);
+  });
+
+  test('los disparos que pegan en los búnkers los rompen y el juego sigue andando', async ({ page }) => {
+    await openGame(page);
+    await page.keyboard.press('Enter');
+    await waitForState(page, 'playing');
+    await page.waitForTimeout(2300);
+    const cells = await game(page, 'bunkerCells');
+    // Segundo búnker: centro en x = 2 × 1024 / 5 = 409.6
+    await game(page, 'setPlayerX(410)');
+    await page.keyboard.down('Space');
+    await page.waitForTimeout(1200);
+    await page.keyboard.up('Space');
+    expect(await game(page, 'bunkerCells')).toBeLessThan(cells);
+    const frames = await game(page, 'frameCount');
+    await page.waitForTimeout(500);
+    expect(await game(page, 'frameCount')).toBeGreaterThan(frames + 10);
   });
 
   test('sin ?test=1 no hay ganchos de trampa expuestos', async ({ page }) => {
