@@ -38,7 +38,7 @@ test('partida real: se guarda en la base y aparece en el ranking', async ({ page
   expect(rows).toEqual([{ player: name, score, wave: 1, mode: 'classic' }]);
 
   await page.getByRole('button', { name: 'VER RANKING' }).click();
-  await expect(page.locator('.board li.me')).toContainText(name);
+  await expect(page.locator('.rankbody .me')).toContainText(name);
   expect(errors).toEqual([]);
 });
 
@@ -72,9 +72,9 @@ test('liga real: uno la crea, otro entra por el link y comparten ranking', async
   await expect(b.locator('.overlay .panel')).toContainText('en la liga Integración');
   await b.getByRole('button', { name: 'VER RANKING' }).click();
   await b.getByRole('tab', { name: 'INTEGRACIÓN' }).click();
-  await expect(b.locator('.board li')).toHaveCount(2);
-  await expect(b.locator('.board')).toContainText('Creador');
-  await expect(b.locator('.board li.me')).toContainText('Invitado');
+  await expect(b.locator('.rankbody [data-pos]')).toHaveCount(2);
+  await expect(b.locator('.rankbody')).toContainText('Creador');
+  await expect(b.locator('.rankbody .me')).toContainText('Invitado');
 
   await ctxA.close();
   await ctxB.close();

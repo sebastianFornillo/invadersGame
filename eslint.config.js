@@ -27,7 +27,7 @@ export default [
     languageOptions: { sourceType: 'script', globals: { ...globals.serviceworker } },
   },
   {
-    files: ['tests/**/*.js', 'scripts/**/*.mjs', 'playwright.config.js', 'eslint.config.js'],
+    files: ['tests/**/*.js', 'tests/**/*.mjs', 'scripts/**/*.mjs', 'playwright.config.js', 'eslint.config.js'],
     languageOptions: {
       sourceType: 'module',
       globals: { ...globals.node, ...globals.browser },

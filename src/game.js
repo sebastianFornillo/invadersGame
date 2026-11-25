@@ -22,6 +22,7 @@ import {
   drawRock, drawJelly, drawTitan, drawVortex, drawPhoenix, rockPos, VORTEX_PULL_RADIUS,
 } from './boss-art.js';
 import { UPGRADES, emptyLevels, upgradeDue, offerUpgrades } from './upgrades.js';
+import { createAchievements } from './achievements.js';
 import { todayUTC, dailySeed, dailyRecord, formatDay, gridText } from './daily.js';
 
 // Modo test (?test=1): expone ganchos para los tests automáticos.
@@ -87,6 +88,14 @@ const SECTOR_LEN = 5;
 const sectorOf = (w) => Math.min(Math.floor((w - 1) / SECTOR_LEN), SECTORS.length - 1);
 const GRAVITY = 0.8; // agujero negro: tirón horizontal hacia el centro
 let R = createStreams(randomSeed(), STREAMS);
+
+// Logros (se guardan en este dispositivo)
+const achievements = createAchievements({
+  load: () => store.get('invaders.achievements', null),
+  save: (d) => store.set('invaders.achievements', d),
+  onUnlock: (a) => { ui.achievement(a); Sound.power(); },
+});
+window.addEventListener('pagehide', () => achievements.flush());
 const rr = (stream, a, b) => a + R[stream]() * (b - a);
 const rpick = (stream, arr) => arr[Math.floor(R[stream]() * arr.length)];
 const overlap = (a, b) =>
@@ -203,6 +212,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') { Sound.toggle(); syncMute(); }
   if (e.code === 'KeyR') openRankingFromGame();
   if (e.code === 'KeyO') openOptionsFromGame();
+  if (e.code === 'KeyL') openAchievementsFromGame();
 });
 window.addEventListener('keyup', (e) => {
   const k = KEYMAP[e.code];
@@ -257,6 +267,9 @@ settings.onChange((s) => {
   touchUI.classList.toggle('left', s.leftHanded);
 });
 
+const achBtn = document.getElementById('achBtn');
+if (achBtn) achBtn.addEventListener('click', () => openAchievementsFromGame());
+ui.setAchievementsOpener(() => ({ list: achievements.list(), count: achievements.count, total: achievements.total }));
 const rankBtn = document.getElementById('rankBtn');
 if (rankBtn) {
   rankBtn.hidden = !online.enabled;
@@ -400,6 +413,7 @@ function registerRun() {
 
 function startWave(n) {
   wave = n;
+  achievements.event('wave', { wave: n });
   cfg = waveConfig(n);
   enemyBullets.length = 0;
   invaders = [];
@@ -1150,6 +1164,7 @@ function damageBoss(n) {
   boss.boomTimer = 0;
   registerKill();
   enemyBullets.length = 0;
+  achievements.event('boss', { kind: boss.kind });
 }
 
 function bossShot(x, y, a, sp) {
@@ -1204,7 +1219,7 @@ function hitAsteroid(rect, byPlayer) {
       a.dead = true;
       explode(a.x, a.y, '#d9a066', 18, 170);
       Sound.rock();
-      if (byPlayer) { addScore(50); floatText(a.x, a.y, '50', '#d9a066', 10); }
+      if (byPlayer) { addScore(50); floatText(a.x, a.y, '50', '#d9a066', 10); achievements.event('rock'); }
     }
     return true;
   }
@@ -1521,6 +1536,8 @@ function gameOver() {
     highscores = highscores.slice(0, 5);
     store.set('invaders.highscores', highscores);
   }
+  achievements.event('gameOver', { shots: stats.shots, hits: stats.hits, daily: mode === 'daily' && !practice });
+  achievements.flush();
   Sound.over();
   offerSubmit();
 }
@@ -1585,6 +1602,7 @@ function openUpgradeChoice() {
 
 function applyUpgrade(id) {
   upgrades[id]++;
+  achievements.event('upgrades', { total: Object.values(upgrades).reduce((a, b) => a + b, 0) });
   if (id === 'life') lives = Math.min(lives + 1, MAX_LIVES);
   const u = UPGRADES.find((x) => x.id === id);
   floatText(player.x, player.y - 50, u.name, '#ffd23f', 11);
@@ -1596,6 +1614,13 @@ function openOptionsFromGame() {
   if (state === 'playing') togglePause();
   input.keys.clear();
   ui.openOptions();
+}
+
+function openAchievementsFromGame() {
+  if (ui.isOpen()) return;
+  if (state === 'playing') togglePause();
+  input.keys.clear();
+  ui.openAchievements({ list: achievements.list(), count: achievements.count, total: achievements.total });
 }
 
 function openRankingFromGame(scope) {
@@ -1614,6 +1639,7 @@ function registerKill() {
   combo = comboTimer > 0 ? combo + 1 : 1;
   comboTimer = 1.6;
   if (combo > maxCombo) maxCombo = combo;
+  if (combo >= 10) achievements.event('combo', { combo });
   if (combo > 0 && combo % 5 === 0 && multiplier() <= 5) {
     floatText(player.x, player.y - 50, 'COMBO x' + multiplier(), '#ffd23f', 12);
   }
@@ -1621,6 +1647,7 @@ function registerKill() {
 
 function addScore(n) {
   score += n;
+  if (score >= 100000) achievements.event('score', { score });
   while (score >= nextLife) {
     nextLife += EXTRA_LIFE_EVERY;
     if (lives < MAX_LIVES) {
@@ -1662,6 +1689,7 @@ function killInvader(inv) {
   const pts = t.points * multiplier() * (diving ? 2 : 1);
   addScore(pts);
   stats.kills++;
+  achievements.event('kill');
   const cx = inv.x + inv.w / 2, cy = inv.y + inv.h / 2;
   floatText(cx, cy, (diving ? '2X ' : '') + pts, t.color, 10);
   explode(cx, cy, t.color, 26, 230);
@@ -1722,6 +1750,7 @@ function collisions() {
           Sound.rock();
           addScore(100);
           floatText(pos.x, pos.y, '100', '#d9a066', 10);
+          achievements.event('rock');
         }
         continue;
       }
@@ -1746,6 +1775,7 @@ function collisions() {
       addScore(pts);
       registerKill();
       floatText(ufo.x + 30, ufo.y + 12, '' + pts, '#ff4fd8', 14);
+      achievements.event('ufo');
       explode(ufo.x + 30, ufo.y + 12, '#ff4fd8', 40, 280);
       Sound.big(); addShake(6);
       dropPower(ufo.x + 30, ufo.y + 12, true);
@@ -1840,6 +1870,7 @@ function update(dt) {
     const bonus = 250 * wave;
     const perfect = waveHits === 0 ? 1000 * wave : 0;
     addScore(bonus + perfect);
+    achievements.event('waveClear', { wave, perfect: waveHits === 0 });
     banner = { text: 'WAVE CLEAR', sub: perfect ? 'PERFECT! +' + (bonus + perfect) : 'BONUS +' + bonus, t: 2.2, color: '#ffd23f' };
     waveLog.push(cfg.boss ? '👑' : waveHits === 0 ? '🟩' : '🟨');
     Sound.clear();
@@ -2235,8 +2266,8 @@ function drawMenu() {
     const label = (isTouch() ? '🏆' : 'R') + ' = RANKING ONLINE' + (lg ? '  ·  LIGA ' + lg.name.toUpperCase() : '');
     drawText(label, W / 2, 470, { size: 9, color: '#ffd23f' });
   }
-  drawText('MOVE < > / A D    FIRE SPACE    PAUSE P    MUTE M    OPTIONS O', W / 2, 500, { size: 9, color: '#8a86b8' });
-  drawText('GAMEPAD SUPPORTED', W / 2, 522, { size: 8, color: '#5a5688' });
+  drawText('MOVE < > / A D    FIRE SPACE    PAUSE P    MUTE M    OPTIONS O    ACHIEVEMENTS L', W / 2, 500, { size: 9, color: '#8a86b8' });
+  drawText(`GAMEPAD SUPPORTED   ·   ACHIEVEMENTS ${achievements.count}/${achievements.total}`, W / 2, 522, { size: 8, color: '#5a5688' });
   if (iosHint) {
     drawText('IPHONE: SHARE > ADD TO HOME SCREEN TO INSTALL', W / 2, 548, { size: 7, color: '#5dc1b9' });
   }
@@ -2462,6 +2493,7 @@ if (TEST_MODE) {
     },
     freeze() { cheated = true; invaders.forEach((i) => (i.dead = true)); enemyBullets.length = 0; },
     get cheated() { return cheated; },
+    get achievements() { return achievements.list().filter((a) => a.unlocked).map((a) => a.id); },
     skipTo(n) { if (state === 'playing') { cheated = true; startWave(n); } },
     killAll() {
       cheated = true;

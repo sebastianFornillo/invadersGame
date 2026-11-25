@@ -398,3 +398,172 @@ html, body {
     .panel.options .opts { grid-template-columns: 1fr 1fr; }
     .panel.options .opt:first-child { grid-column: 1 / -1; }
 }
+
+/* ---------- Ranking renovado ---------- */
+.panel.ranking { width: min(520px, 100%); }
+.tabrow { display: flex; gap: 6px; align-items: flex-start; }
+.tabrow .tabs { flex: 1; }
+.refresh {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(93, 193, 185, 0.5);
+    border-radius: 10px;
+    background: transparent;
+    color: #5dc1b9;
+    font: inherit;
+    font-size: 16px;
+    cursor: pointer;
+}
+.refresh:disabled { opacity: 0.4; }
+.refresh:not(:disabled):hover { background: rgba(93, 193, 185, 0.15); }
+
+.mycard {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 4px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 210, 63, 0.45);
+    border-radius: 12px;
+    background: linear-gradient(90deg, rgba(255, 210, 63, 0.16), rgba(255, 210, 63, 0.03));
+    text-align: left;
+    font-size: 10px;
+    line-height: 1.8;
+}
+.mycard.empty { border-color: rgba(138, 134, 184, 0.35); background: rgba(255, 255, 255, 0.03); color: #8a86b8; }
+.mycard .mypos { font-size: 22px; color: #ffd23f; text-shadow: 0 0 12px rgba(255, 210, 63, 0.6); }
+.mycard b { color: #fff; }
+
+.podium {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    align-items: end;
+    gap: 8px;
+    margin: 6px 0 12px;
+}
+.podium .step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    animation: rise 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+    animation-delay: calc(var(--i) * 0.08s);
+}
+.podium .medal { font-size: 26px; }
+.podium .p1 .medal { font-size: 34px; filter: drop-shadow(0 0 10px rgba(255, 210, 63, 0.7)); }
+.podium .name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.podium .pts { font-size: 11px; color: #fff; font-variant-numeric: tabular-nums; }
+.podium .block {
+    width: 100%;
+    display: grid;
+    place-items: center;
+    border-radius: 10px 10px 4px 4px;
+    color: rgba(5, 1, 15, 0.7);
+    font-size: 18px;
+}
+.podium .p1 .block { height: 64px; background: linear-gradient(#ffe27a, #d9a400); box-shadow: 0 0 22px rgba(255, 210, 63, 0.45); }
+.podium .p2 .block { height: 46px; background: linear-gradient(#e6e9f5, #9aa0b8); }
+.podium .p3 .block { height: 34px; background: linear-gradient(#f0b27a, #b0683a); }
+.podium .step.me .name { color: #ffd23f; }
+
+.board li { grid-template-columns: 3.4em minmax(0, 1fr) auto 7em; animation: slidein 0.35s ease-out both; animation-delay: calc(var(--i) * 0.025s); }
+.board .name small { display: block; color: #5a5688; font-size: 8px; margin-top: 2px; }
+.board .wave, .podium .wave {
+    padding: 2px 6px;
+    border: 1px solid var(--c, #5dc1b9);
+    border-radius: 6px;
+    color: var(--c, #5dc1b9);
+    font-size: 8px;
+}
+.mycard .wave { padding: 1px 5px; border: 1px solid var(--c); border-radius: 6px; color: var(--c); font-size: 8px; }
+
+.skeleton { display: grid; gap: 8px; margin: 8px 0; }
+.skeleton i {
+    height: 26px;
+    border-radius: 8px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+    background-size: 200% 100%;
+    animation: shimmer 1.1s linear infinite;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(18px); } }
+@keyframes slidein { from { opacity: 0; transform: translateX(-10px); } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* ---------- Logros ---------- */
+.panel.achievements { width: min(620px, 100%); }
+.achhead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.achhead b { color: #ffd23f; font-size: 14px; }
+.bar {
+    position: relative;
+    display: block;
+    height: 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+.bar.big { flex: 1; height: 10px; }
+.bar i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #5dc1b9, #ffd23f); border-radius: inherit; }
+.ach .bar { height: 14px; margin-top: 4px; }
+.ach .bar em { position: relative; display: block; font-style: normal; font-size: 7px; line-height: 14px; color: #fff; text-align: center; }
+.achgroup h3 { display: flex; justify-content: space-between; margin: 12px 2px 6px; font-size: 10px; color: #5dc1b9; }
+.achgroup h3 small { color: #8a86b8; }
+.achgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.ach {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    column-gap: 8px;
+    align-content: start;
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    text-align: left;
+    opacity: 0.6;
+}
+.ach .icon { grid-row: span 2; font-size: 22px; filter: grayscale(1); }
+.ach .title { font-size: 9px; color: #c9c6e8; }
+.ach .desc { font-size: 7px; line-height: 1.5; color: #8a86b8; }
+.ach .bar, .ach .date { grid-column: 1 / -1; }
+.ach .date { margin-top: 4px; font-size: 7px; color: #5a5688; }
+.ach.on { opacity: 1; border-color: rgba(255, 210, 63, 0.45); background: rgba(255, 210, 63, 0.07); }
+.ach.on .icon { filter: none; }
+.ach.on .title { color: #ffd23f; }
+
+.achtoast {
+    position: fixed;
+    top: 64px;
+    right: 14px;
+    z-index: 31;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 2px solid #ffd23f;
+    border-radius: 12px;
+    background: rgba(10, 6, 32, 0.94);
+    box-shadow: 0 0 24px rgba(255, 210, 63, 0.35);
+    color: #fff;
+    font-size: 10px;
+    pointer-events: none;
+}
+.achtoast .icon { font-size: 26px; }
+.achtoast small { display: block; color: #ffd23f; font-size: 7px; margin-bottom: 3px; }
+.achtoast.show { animation: achin 3s ease both; }
+@keyframes achin {
+    0% { opacity: 0; transform: translateX(40px) scale(0.9); }
+    10%, 85% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: translateY(-10px); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .podium .step, .board li, .skeleton i, .achtoast.show { animation: none; }
+}

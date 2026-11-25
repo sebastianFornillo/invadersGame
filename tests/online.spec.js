@@ -37,11 +37,15 @@ test.describe('ranking online', () => {
     await expect(page.locator('#rankBtn')).toBeVisible();
     await page.keyboard.press('KeyR');
     await expect(panel(page)).toContainText('RANKING');
-    await expect(page.locator('.board li')).toHaveCount(4); // 3 filas + "· · ·"
-    await expect(page.locator('.board li.me')).toContainText('Yo');
+    await expect(page.locator('.rankbody [data-pos]')).toHaveCount(3);
+    await expect(page.locator('.podium .p1')).toContainText('Lea');
+    await expect(page.locator('.podium .p2')).toContainText('Fede');
+    await expect(page.locator('.board li.gap')).toHaveCount(1); // del #2 salta al #7
+    await expect(page.locator('.rankbody .me')).toContainText('Yo');
+    await expect(page.locator('.mycard')).toContainText('#7');
     expect(calls.find((c) => c.fn === 'get_leaderboard').apikey).toBe('sb_publishable_test');
     await page.getByRole('tab', { name: 'SEMANA' }).click();
-    await expect(page.locator('.board li.me')).toContainText('Semanal');
+    await expect(page.locator('.rankbody .me')).toContainText('Semanal');
     expect(calls.filter((c) => c.fn === 'get_leaderboard').map((c) => c.args.p_scope)).toEqual(['global', 'week']);
     await page.keyboard.press('Escape');
     await expect(panel(page)).toHaveCount(0);

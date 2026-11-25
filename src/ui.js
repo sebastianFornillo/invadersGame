@@ -7,6 +7,7 @@ import {
 import { formatDay, gridText, shareText, dailyLink } from './daily.js';
 import { settings } from './settings.js';
 import { canVibrate } from './platform.js';
+import { GROUPS } from './achievements.js';
 
 const fmt = (n) => Number(n).toLocaleString('es-AR');
 
@@ -110,13 +111,80 @@ export function addScope(scope, index = SCOPES.length) {
   if (!SCOPES.some((s) => s.id === scope.id)) SCOPES.splice(index, 0, scope);
 }
 
+// Color del sector en el que terminó cada partida (igual que en el juego)
+const SECTOR_COLORS = ['#5dc1b9', '#ff4fd8', '#d9a066', '#9b7bff', '#ffb020'];
+const SECTOR_NAMES = ['ÓRBITA', 'NEBULOSA', 'ASTEROIDES', 'AGUJERO NEGRO', 'CORONA SOLAR'];
+const sectorIndex = (wave) => Math.min(Math.max(Math.floor((wave - 1) / 5), 0), 4);
+const MEDALS = ['🥇', '🥈', '🥉'];
+
+function timeAgo(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const min = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (min < 1) return 'recién';
+  if (min < 60) return `hace ${min} min`;
+  const hs = Math.round(min / 60);
+  if (hs < 24) return `hace ${hs} h`;
+  const d = Math.round(hs / 24);
+  if (d < 30) return `hace ${d} d`;
+  return `hace ${Math.round(d / 30)} m`;
+}
+
+function waveBadge(wave) {
+  const i = sectorIndex(wave);
+  return h('span', {
+    class: 'wave', style: `--c:${SECTOR_COLORS[i]}`, title: SECTOR_NAMES[i], text: `W${wave}`,
+  });
+}
+
+// Tarjeta "tu posición": dónde estás y cuánto te falta para el de arriba
+function myCard(rows) {
+  const me = rows.find((r) => r.is_me);
+  if (!me) {
+    return h('div', { class: 'mycard empty' }, h('span', { text: 'Todavía no tenés puntaje acá. ¡Jugá y entrá al ranking!' }));
+  }
+  const above = rows.find((r) => r.pos === me.pos - 1);
+  let goal;
+  if (me.pos === 1) goal = h('span', { class: 'gold', text: '👑 ¡Sos el número 1!' });
+  else if (above) goal = h('span', {}, 'Te faltan ', h('b', { text: fmt(above.score - me.score + 10) }), ` pts para pasar a ${above.player}`);
+  else goal = h('span', { text: `Estás en el puesto ${me.pos}` });
+  return h(
+    'div',
+    { class: 'mycard' },
+    h('span', { class: 'mypos', text: `#${me.pos}` }),
+    h('span', { class: 'mybody' }, h('b', { text: fmt(me.score) }), ' pts · ', waveBadge(me.wave), h('br'), goal),
+  );
+}
+
+function podium(rows) {
+  const top = [rows.find((r) => r.pos === 2), rows.find((r) => r.pos === 1), rows.find((r) => r.pos === 3)];
+  return h(
+    'div',
+    { class: 'podium', 'aria-label': 'Podio' },
+    top.map((r, i) => {
+      if (!r) return h('div', { class: 'step empty' });
+      const place = r.pos - 1;
+      return h(
+        'div',
+        { class: `step p${r.pos}${r.is_me ? ' me' : ''}`, style: `--i:${i}`, 'data-pos': r.pos },
+        h('span', { class: 'medal', 'aria-hidden': 'true', text: MEDALS[place] }),
+        h('span', { class: 'name', text: r.player }),
+        h('span', { class: 'pts', text: fmt(r.score) }),
+        waveBadge(r.wave),
+        h('span', { class: 'block', text: String(r.pos) }),
+      );
+    }),
+  );
+}
+
 function openRanking({ scope = 'global', onClose } = {}) {
   const lg = league.get();
   const scopes = SCOPES.filter((s) => !s.needsLeague || lg);
   const initial = scopes.some((s) => s.id === scope) ? scope : 'global';
-  const list = h('ol', { class: 'board' });
+  const body = h('div', { class: 'rankbody' });
   const status = h('p', { class: 'muted', role: 'status' });
   let token = 0;
+  let current = initial;
 
   const tabs = h(
     'div',
@@ -130,51 +198,138 @@ function openRanking({ scope = 'global', onClose } = {}) {
       }),
     ),
   );
+  const refresh = h('button', { class: 'refresh', 'aria-label': 'Actualizar', title: 'Actualizar', onclick: () => load(current), text: '⟳' });
 
   async function load(id) {
     const my = ++token;
+    current = id;
     for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.scope === id));
-    list.replaceChildren();
+    body.replaceChildren(h('div', { class: 'skeleton', 'aria-hidden': 'true' }, Array.from({ length: 6 }, () => h('i'))));
     status.textContent = 'Cargando…';
+    refresh.disabled = true;
     try {
       const rows = await api.leaderboard(id, lg && lg.code);
       if (my !== token || root.hidden) return;
       status.textContent = rows.length ? '' : 'Todavía no hay puntajes. ¡Sé el primero!';
-      let prev = 0;
-      for (const r of rows) {
+      const list = h('ol', { class: 'board' });
+      let prev = 3;
+      let meRow = null;
+      for (const r of rows.filter((x) => x.pos > 3)) {
         if (r.pos > prev + 1) list.append(h('li', { class: 'gap', 'aria-hidden': 'true', text: '· · ·' }));
-        list.append(
-          h(
-            'li',
-            { class: r.is_me ? 'me' : null },
-            h('span', { class: 'pos', text: `#${r.pos}` }),
-            h('span', { class: 'name', text: r.player }),
-            h('span', { class: 'wave', text: `W${r.wave}` }),
-            h('span', { class: 'pts', text: fmt(r.score) }),
-          ),
+        const li = h(
+          'li',
+          { class: r.is_me ? 'me' : null, style: `--i:${Math.min(r.pos, 20)}`, 'data-pos': r.pos },
+          h('span', { class: 'pos', text: `#${r.pos}` }),
+          h('span', { class: 'name' }, r.player, h('small', { text: timeAgo(r.created_at) })),
+          waveBadge(r.wave),
+          h('span', { class: 'pts', text: fmt(r.score) }),
         );
+        if (r.is_me) meRow = li;
+        list.append(li);
         prev = r.pos;
       }
+      body.replaceChildren(...(rows.length ? [myCard(rows), podium(rows), list] : []));
+      if (meRow && meRow.scrollIntoView) meRow.scrollIntoView({ block: 'nearest' });
     } catch (e) {
-      if (my === token) status.textContent = `No se pudo cargar el ranking. ${friendly(e)}`;
+      if (my === token) {
+        body.replaceChildren();
+        status.textContent = `No se pudo cargar el ranking. ${friendly(e)}`;
+      }
+    } finally {
+      if (my === token) refresh.disabled = false;
     }
   }
 
-  open(
-    panel(
-      'RANKING',
-      tabs,
-      status,
-      list,
-      h(
-        'footer',
-        {},
-        h('button', { class: 'btn ghost', onclick: () => openLeagues({ onClose }), text: lg ? 'MI LIGA' : 'LIGAS PRIVADAS' }),
-      ),
+  const pnl = panel(
+    'RANKING',
+    h('div', { class: 'tabrow' }, tabs, refresh),
+    status,
+    body,
+    h(
+      'footer',
+      {},
+      h('button', { class: 'btn ghost', onclick: () => openLeagues({ onClose }), text: lg ? 'MI LIGA' : 'LIGAS PRIVADAS' }),
+      achievementsSource && h('button', { class: 'btn ghost', onclick: () => openAchievements({ ...achievementsSource(), onClose }), text: '🏅 LOGROS' }),
     ),
-    { onClose },
   );
+  pnl.classList.add('ranking');
+  open(pnl, { onClose });
   load(initial);
+}
+
+// ---------------------------------------------------------------------
+// Logros
+// ---------------------------------------------------------------------
+let achievementsSource = null;
+const setAchievementsOpener = (fn) => { achievementsSource = fn; };
+
+function openAchievements({ list, count, total, onClose } = {}) {
+  const pct = total ? Math.round((count / total) * 100) : 0;
+  const groups = GROUPS.map((g) => {
+    const items = list.filter((a) => a.group === g.id);
+    const done = items.filter((a) => a.unlocked).length;
+    return h(
+      'section',
+      { class: 'achgroup' },
+      h('h3', {}, g.label, h('small', { text: `${done}/${items.length}` })),
+      h(
+        'ul',
+        { class: 'achgrid' },
+        items.map((a) =>
+          h(
+            'li',
+            { class: a.unlocked ? 'ach on' : 'ach', 'data-id': a.id, title: a.desc },
+            h('span', { class: 'icon', 'aria-hidden': 'true', text: a.unlocked ? a.icon : '🔒' }),
+            h('span', { class: 'title', text: a.name }),
+            h('span', { class: 'desc', text: a.desc }),
+            a.target && !a.unlocked &&
+              h('span', { class: 'bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(a.target), 'aria-valuenow': String(a.progress) },
+                h('i', { style: `width:${(100 * a.progress) / a.target}%` }),
+                h('em', { text: `${fmt(a.progress)} / ${fmt(a.target)}` })),
+            a.unlocked && h('span', { class: 'date', text: new Date(a.unlocked).toLocaleDateString('es-AR') }),
+          ),
+        ),
+      ),
+    );
+  });
+  const pnl = panel(
+    'LOGROS',
+    h('div', { class: 'achhead' },
+      h('b', { text: `${count} / ${total}` }),
+      h('span', { class: 'bar big' }, h('i', { style: `width:${pct}%` })),
+      h('span', { class: 'muted', text: `${pct}%` })),
+    ...groups,
+    h('footer', {}, h('button', { class: 'btn', 'data-autofocus': true, onclick: close, text: 'LISTO' })),
+  );
+  pnl.classList.add('achievements');
+  open(pnl, { onClose });
+}
+
+// Aviso de logro desbloqueado (no tapa el juego ni roba el foco)
+const achEl = h('div', { class: 'achtoast', role: 'status', 'aria-live': 'polite', hidden: true });
+document.body.append(achEl);
+const achQueue = [];
+let achBusy = false;
+
+function achievement(a) {
+  achQueue.push(a);
+  if (!achBusy) nextAchievement();
+}
+
+function nextAchievement() {
+  const a = achQueue.shift();
+  if (!a) { achBusy = false; achEl.hidden = true; return; }
+  achBusy = true;
+  achEl.replaceChildren(
+    h('span', { class: 'icon', 'aria-hidden': 'true', text: a.icon }),
+    h('span', {}, h('small', { text: 'LOGRO DESBLOQUEADO' }), h('b', { text: a.name })),
+  );
+  achEl.dataset.id = a.id;
+  achEl.hidden = false;
+  achEl.classList.remove('show');
+  void achEl.offsetWidth; // reinicia la animación
+  achEl.classList.add('show');
+  setTimeout(nextAchievement, 3000);
 }
 
 // ---------------------------------------------------------------------
@@ -646,6 +801,9 @@ export const ui = {
   close,
   toast,
   openRanking,
+  openAchievements,
+  setAchievementsOpener,
+  achievement,
   openSubmit,
   openLeagues,
   openDaily,
