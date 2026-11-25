@@ -92,7 +92,8 @@ test('si el rival cierra el juego, ganás por abandono', async ({ browser }) => 
   const b = await joinByLink(browser, relay, code, 'Lea');
   for (const p of [a, b]) await expect.poll(async () => (await vs(p)).status, { timeout: 8000 }).toBe('playing');
   await b.context().close();
-  await expect(a.locator('.vsresult')).toHaveText('¡GANASTE!', { timeout: 8000 });
+  // El "bye" es a mejor esfuerzo: si no llega antes de cerrar, a los 10 s sin señal cuenta igual
+  await expect(a.locator('.vsresult')).toHaveText('¡GANASTE!', { timeout: 16_000 });
   await expect(a.locator('.panel.versus')).toContainText('se desconectó');
   await expect(a.getByRole('button', { name: 'REVANCHA' })).toBeDisabled();
 });
