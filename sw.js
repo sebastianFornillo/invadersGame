@@ -2,7 +2,7 @@
 // Estrategia "primero la red": siempre se carga la última versión publicada
 // y, si no hay internet, se usa la copia guardada.
 // Al agregar archivos nuevos al juego, sumalos a CORE (un test lo verifica).
-const CACHE = 'invaders-v2.4.0';
+const CACHE = 'invaders-v2.6.0';
 
 const CORE = [
   './',
@@ -20,6 +20,7 @@ const CORE = [
   './src/daily.js',
   './src/settings.js',
   './src/upgrades.js',
+  './src/boss-art.js',
   './img/spaceship.png',
   './img/invader.png',
   './assets/fonts/press-start-2p-latin.woff2',

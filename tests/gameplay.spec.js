@@ -121,10 +121,10 @@ test.describe('enemigos nuevos', () => {
     expect(await game(page, 'bunkerCells')).toBeLessThan(cells);
   });
 
-  test('el jefe de la oleada 15 es MK II y suelta escoltas', async ({ page }) => {
+  test('en la segunda vuelta la nave nodriza vuelve como MK II y suelta escoltas', async ({ page }) => {
     await openGame(page);
     await start(page);
-    await game(page, 'skipTo(15)');
+    await game(page, 'skipTo(30)');
     expect(await game(page, 'bossInfo')).toEqual({ level: 2, name: 'MOTHERSHIP MK II' });
     await expect.poll(async () => (await game(page, 'kinds')).mini || 0, { timeout: 12_000 }).toBeGreaterThan(0);
   });
