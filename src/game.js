@@ -14,7 +14,7 @@ import { Sound } from './sound.js';
 import {
   vibrate, setupPWA, promptInstall, toggleFullscreen, fullscreenSupported, needsIosInstallHint,
 } from './platform.js';
-import { online, api, league } from './online.js';
+import { online, api, league, deviceId } from './online.js';
 import { ui } from './ui.js';
 import { createStreams, randomSeed } from './rng.js';
 import { settings } from './settings.js';
@@ -23,6 +23,8 @@ import {
 } from './boss-art.js';
 import { UPGRADES, emptyLevels, upgradeDue, offerUpgrades } from './upgrades.js';
 import { createAchievements } from './achievements.js';
+import { createMatch, newRoomCode, channelName, VS_CODE_RE } from './versus.js';
+import { joinChannel } from './realtime.js';
 import { todayUTC, dailySeed, dailyRecord, formatDay, gridText } from './daily.js';
 
 // Modo test (?test=1): expone ganchos para los tests automáticos.
@@ -95,7 +97,7 @@ const achievements = createAchievements({
   save: (d) => store.set('invaders.achievements', d),
   onUnlock: (a) => { ui.achievement(a); Sound.power(); },
 });
-window.addEventListener('pagehide', () => achievements.flush());
+window.addEventListener('pagehide', () => { achievements.flush(); leaveMatch(); });
 const rr = (stream, a, b) => a + R[stream]() * (b - a);
 const rpick = (stream, arr) => arr[Math.floor(R[stream]() * arr.length)];
 const overlap = (a, b) =>
@@ -204,8 +206,9 @@ window.addEventListener('keydown', (e) => {
   if (k) input.keys.add(k);
   if (e.repeat) return;
   if (state === 'menu') {
-    const sel = e.code === 'ArrowLeft' || e.code === 'KeyA' ? 0 : e.code === 'ArrowRight' || e.code === 'KeyD' ? 1 : -1;
-    if (sel >= 0 && sel !== menuSel) { menuSel = sel; Sound.march(sel); }
+    const dir = e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : e.code === 'ArrowRight' || e.code === 'KeyD' ? 1 : 0;
+    const sel = clamp(menuSel + dir, 0, MENU_OPTS.length - 1);
+    if (dir && sel !== menuSel) { menuSel = sel; Sound.march(sel); }
   }
   if (e.code === 'Enter' || e.code === 'Space') confirm();
   if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
@@ -341,6 +344,21 @@ let mode = 'classic', practice = false, dailyDay = null, waveLog = [], menuSel =
 let upgrades = emptyLevels(), lasers = [];
 // Sector actual, salto al hiperespacio y peligros del escenario
 let sector = 0, warp = 0, asteroids = [], hazardTimer = 0;
+// Versus: sala activa, cuenta regresiva y avisos sobre el rival
+let match = null, vsCountdown = 0, vsStartAt = 0, vsRivalDown = false, vsLeadShown = false, vsResult = null, vsIncoming = 0;
+let vsRoom = null, vsResultPanel = null;
+
+// Link de un versus: ?vs=CODIGO abre la sala con el código puesto
+{
+  const params = new URLSearchParams(location.search);
+  const vs = (params.get('vs') || '').trim().toUpperCase();
+  if (vs) {
+    params.delete('vs');
+    const rest = params.toString();
+    history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+    if (VS_CODE_RE.test(vs)) { menuSel = 2; setTimeout(() => openVersusLobby(vs), 0); }
+  }
+}
 
 // Link directo al desafío: ?modo=diario abre el menú con esa opción elegida
 {
@@ -373,11 +391,14 @@ function waveConfig(n) {
   };
 }
 
-function newGame({ mode: m = 'classic', day = null, practice: p = false } = {}) {
+function newGame({ mode: m = 'classic', day = null, practice: p = false, seed = null } = {}) {
   mode = m;
   practice = m === 'daily' && p;
   dailyDay = m === 'daily' ? day || todayUTC() : null;
-  R = createStreams(m === 'daily' ? dailySeed(dailyDay) : randomSeed(), STREAMS);
+  if (m !== 'versus') leaveMatch();
+  vsCountdown = m === 'versus' ? 3 : 0;
+  vsRivalDown = false; vsLeadShown = false; vsResult = null; vsIncoming = 0;
+  R = createStreams(m === 'daily' ? dailySeed(dailyDay) : m === 'versus' ? seed : randomSeed(), STREAMS);
   waveLog = [];
   upgrades = emptyLevels();
   lasers = [];
@@ -405,7 +426,7 @@ function registerRun() {
   runId = null;
   cheated = false;
   const token = ++runToken;
-  if (!online.enabled || practice) return;
+  if (!online.enabled || practice || mode === 'versus') return;
   api.startRun(mode)
     .then((r) => { if (token === runToken && r) runId = r.run_id; })
     .catch(() => { /* sin ranking para esta partida */ });
@@ -1165,6 +1186,7 @@ function damageBoss(n) {
   registerKill();
   enemyBullets.length = 0;
   achievements.event('boss', { kind: boss.kind });
+  sendAttack(4);
 }
 
 function bossShot(x, y, a, sp) {
@@ -1543,6 +1565,10 @@ function gameOver() {
 }
 
 function offerSubmit() {
+  if (mode === 'versus') {
+    if (match) match.gameOver({ score, wave });
+    return;
+  }
   const daily = mode === 'daily';
   const day = dailyDay;
   const token = runToken;
@@ -1616,6 +1642,114 @@ function openOptionsFromGame() {
   ui.openOptions();
 }
 
+// ------------------------------------------------------------------
+// Versus 1 contra 1
+// ------------------------------------------------------------------
+function openVersusLobby(code = '') {
+  if (!online.enabled) { ui.toast('El versus necesita el servidor online'); return; }
+  if (ui.isOpen()) return;
+  input.keys.clear();
+  ui.openVersus({
+    code,
+    onCreate: (name) => startMatch(newRoomCode(), name),
+    onJoin: (c, name) => startMatch(c, name),
+  });
+}
+
+function startMatch(code, name) {
+  leaveMatch();
+  vsRoom = ui.versusRoom({ code, onCancel: () => { if (match && match.status !== 'countdown') leaveMatch(); } });
+  const id = `${deviceId().slice(0, 8)}-${Math.random().toString(36).slice(2, 10)}`;
+  match = createMatch({
+    code, name, id,
+    connect: (onMessage, onStatus) => joinChannel(channelName(code), { onMessage, onStatus }),
+    onEvent: onVersusEvent,
+  });
+}
+
+function leaveMatch() {
+  if (match) { const m = match; match = null; m.leave(); }
+  vsRoom = null;
+  vsResultPanel = null;
+}
+
+function onVersusEvent(type, data) {
+  const m = match;
+  if (!m) return;
+  if (type === 'status' || type === 'rival' || type === 'error') {
+    if (vsRoom) vsRoom.update({ status: m.status, rival: m.rival, error: data.reason });
+    if (type === 'rival' && vsResultPanel) {
+      if (data.rival.gone) vsResultPanel.rivalLeft();
+      else if (data.rival.again) vsResultPanel.rivalWantsRematch();
+    }
+    if (type === 'status' && data.status === 'full') ui.toast('Esa sala ya tiene dos jugadores');
+    return;
+  }
+  if (type === 'start') {
+    vsRoom = null;
+    vsResultPanel = null;
+    if (ui.isOpen()) ui.close();
+    newGame({ mode: 'versus', seed: data.seed });
+    vsStartAt = performance.now() + data.delay;
+    vsCountdown = data.delay / 1000;
+    return;
+  }
+  if (type === 'attack') { receiveAttack(data.n); return; }
+  if (type === 'result') {
+    vsResult = data;
+    if (data.outcome === 'win') achievements.event('versusWin');
+    // El rival se fue mientras jugabas: la partida termina acá
+    if (state === 'playing' && player.alive) {
+      banner = { text: 'YOU WIN', sub: (m.rival ? m.rival.name : 'RIVAL') + ' DISCONNECTED', t: 2, color: '#ffd23f' };
+      gameOver();
+    }
+    setTimeout(() => showVersusResult(), state === 'gameover' && stateTime < 1 ? 1100 : 0);
+  }
+}
+
+function showVersusResult() {
+  if (!match || !vsResult || mode !== 'versus') return;
+  if (ui.isOpen()) ui.close();
+  input.keys.clear();
+  vsResultPanel = ui.versusResult({
+    ...vsResult,
+    onRematch: () => (match ? match.rematch() : false),
+    onMenu: () => { leaveMatch(); ui.close(); backToMenu(2); },
+  });
+}
+
+function versusTick() {
+  if (!match) return;
+  match.report({ score, wave, lives, alive: player.alive });
+  const r = match.rival;
+  if (!r) return;
+  if (r.over && !vsRivalDown && player.alive) {
+    vsRivalDown = true;
+    banner = { text: 'RIVAL DOWN', sub: score > r.score ? 'YOU ARE AHEAD · KEEP GOING' : 'BEAT ' + r.score + ' TO WIN', t: 2.4, color: '#ff4fd8' };
+  }
+  if (vsRivalDown && !vsLeadShown && score > r.score) {
+    vsLeadShown = true;
+    banner = { text: 'YOU LEAD!', sub: 'NOW SURVIVE TO SCORE MORE', t: 2, color: '#ffd23f' };
+    Sound.life();
+  }
+}
+
+function sendAttack(n) {
+  if (mode !== 'versus' || !match || match.status !== 'playing') return;
+  match.attack(n);
+  floatText(player.x, player.y - 64, 'ATTACK SENT x' + n, '#ff4fd8', 11);
+}
+
+// Invasores extra que manda el rival: bajan en picada (no usan el azar compartido)
+function receiveAttack(n) {
+  if (state !== 'playing' || !player.alive) return;
+  vsIncoming += n;
+  const x = 80 + Math.random() * (W - 160);
+  spawnMinis(x, -30, n);
+  banner = { text: 'INCOMING!', sub: n + ' INVADERS FROM ' + (match && match.rival ? match.rival.name : 'RIVAL'), t: 1.2, color: '#ff4fd8' };
+  Sound.warning();
+}
+
 function openAchievementsFromGame() {
   if (ui.isOpen()) return;
   if (state === 'playing') togglePause();
@@ -1640,6 +1774,7 @@ function registerKill() {
   comboTimer = 1.6;
   if (combo > maxCombo) maxCombo = combo;
   if (combo >= 10) achievements.event('combo', { combo });
+  if (combo > 0 && combo % 10 === 0) sendAttack(1);
   if (combo > 0 && combo % 5 === 0 && multiplier() <= 5) {
     floatText(player.x, player.y - 50, 'COMBO x' + multiplier(), '#ffd23f', 12);
   }
@@ -1871,6 +2006,7 @@ function update(dt) {
     const perfect = waveHits === 0 ? 1000 * wave : 0;
     addScore(bonus + perfect);
     achievements.event('waveClear', { wave, perfect: waveHits === 0 });
+    sendAttack(waveHits === 0 ? 3 : 2);
     banner = { text: 'WAVE CLEAR', sub: perfect ? 'PERFECT! +' + (bonus + perfect) : 'BONUS +' + bonus, t: 2.2, color: '#ffd23f' };
     waveLog.push(cfg.boss ? '👑' : waveHits === 0 ? '🟩' : '🟨');
     Sound.clear();
@@ -2180,7 +2316,7 @@ function drawHUD() {
   }
   const hi = mode === 'classic' ? Math.max(best(), score) : best(); // el récord local es del modo normal
   drawText('HI ' + String(hi).padStart(7, '0'), W / 2, 20, { size: 10, color: '#ff4fd8' });
-  const modeTag = mode === 'daily' ? (practice ? 'PRACTICE · ' : 'DAILY · ') : '';
+  const modeTag = mode === 'daily' ? (practice ? 'PRACTICE · ' : 'DAILY · ') : mode === 'versus' ? 'VERSUS · ' : '';
   drawText(modeTag + 'S' + (sector + 1) + ' · WAVE ' + wave, W / 2, 38, { size: 9, color: mode === 'daily' ? '#ffd23f' : SECTORS[sector].color });
 
   for (let i = 0; i < lives; i++) drawShipIcon(16 + i * 34, H - 26, 0.32);
@@ -2201,6 +2337,43 @@ function drawHUD() {
     drawText(name, px - 40, H - 30, { size: 7, color: col });
     px -= 96;
   }
+}
+
+function drawRivalHUD() {
+  if (mode !== 'versus' || !match) return;
+  const r = match.rival;
+  const x = W - 20, y = 70;
+  ctx.save();
+  ctx.fillStyle = 'rgba(5,1,15,0.6)';
+  ctx.strokeStyle = 'rgba(255,79,216,0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x - 190, y - 14, 190, 64, 8); else ctx.rect(x - 190, y - 14, 190, 64);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  if (!r) { drawText('WAITING FOR RIVAL', x - 95, y + 18, { size: 8, color: '#8a86b8' }); return; }
+  drawText('VS ' + r.name.toUpperCase(), x - 180, y, { size: 8, color: '#ff4fd8', align: 'left' });
+  drawText(r.gone ? 'LEFT' : r.over ? 'OUT' : 'W' + r.wave, x - 10, y, { size: 8, color: r.over || r.gone ? '#ff6b81' : '#5dc1b9', align: 'right' });
+  drawText(String(r.score).padStart(7, '0'), x - 180, y + 20, { size: 12, align: 'left' });
+  for (let i = 0; i < Math.min(r.lives, 5) && !r.over; i++) drawShipIcon(x - 22 - i * 24, y + 20, 0.22);
+  const diff = score - r.score;
+  const lead = diff >= 0;
+  drawText((lead ? '+' : '-') + Math.abs(diff), x - 180, y + 40, { size: 8, color: lead ? '#4ef08a' : '#ff6b81', align: 'left' });
+  // Barra de quién va ganando
+  const total = Math.max(score + r.score, 1);
+  ctx.fillStyle = '#ff4fd8';
+  ctx.fillRect(x - 100, y + 37, 90, 5);
+  ctx.fillStyle = '#5dc1b9';
+  ctx.fillRect(x - 100, y + 37, 90 * (score / total), 5);
+}
+
+function drawCountdown() {
+  if (mode !== 'versus' || vsCountdown <= 0) return;
+  const n = Math.ceil(vsCountdown);
+  const f = vsCountdown - Math.floor(vsCountdown);
+  drawText(String(n), W / 2, H / 2 - 10, { size: 60 + f * 30, color: '#ff4fd8', glow: '#ff4fd8', blur: 24, alpha: 0.4 + f * 0.6 });
+  if (match && match.rival) drawText('VS ' + match.rival.name.toUpperCase(), W / 2, H / 2 + 50, { size: 12, color: '#ffffff' });
 }
 
 function drawBanner() {
@@ -2282,8 +2455,8 @@ function drawMenuOptions() {
     ctx.fillStyle = sel ? 'rgba(93,193,185,0.24)' : 'rgba(5,1,15,0.55)';
     if (sel) { ctx.shadowColor = '#5dc1b9'; ctx.shadowBlur = 18; }
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(o.x - 130, MENU_Y - 23, 260, 46, 10);
-    else ctx.rect(o.x - 130, MENU_Y - 23, 260, 46);
+    if (ctx.roundRect) ctx.roundRect(o.x - MENU_HALF, MENU_Y - 23, MENU_HALF * 2, 46, 10);
+    else ctx.rect(o.x - MENU_HALF, MENU_Y - 23, MENU_HALF * 2, 46);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
@@ -2297,10 +2470,13 @@ function drawMenuOptions() {
     if (!rec) hint = 'SAME WAVES FOR EVERYONE  ·  1 TRY PER DAY';
     else if (rec.status === 'done') hint = `TODAY: ${rec.score} PTS  ·  WAVE ${rec.wave}  ·  ${isTouch() ? 'TAP' : 'ENTER'} TO SHARE`;
     else hint = "TODAY'S TRY IS USED  ·  PRACTICE AVAILABLE";
+  } else if (menuSel === 2) {
+    color = '#ff4fd8';
+    hint = online.enabled ? 'PLAY LIVE AGAINST A FRIEND  ·  SAME WAVES FOR BOTH' : 'VERSUS NEEDS THE ONLINE SERVER';
   } else {
     hint = isTouch() ? 'TAP TO START' : 'PRESS ENTER TO START  ·  < > TO CHOOSE';
   }
-  if (menuSel === 1 || Math.floor(time * 2) % 2 === 0) drawText(hint, W / 2, 418, { size: 9, color });
+  if (menuSel > 0 || Math.floor(time * 2) % 2 === 0) drawText(hint, W / 2, 418, { size: 9, color });
 }
 
 function drawPause() {
@@ -2341,6 +2517,14 @@ function drawGameOver() {
     const mine = h.score === score && newRecord && i === 0;
     drawText(`${i + 1}. ${String(h.score).padStart(7, '0')}  W${h.wave}`, W / 2 + 150, 218 + i * 22, { size: 10, color: mine ? '#ffd23f' : '#ffffff' });
   });
+  if (mode === 'versus') {
+    const r = match && match.rival;
+    let msg = 'MATCH OVER';
+    if (match && !vsResult && r && !r.over && !r.gone) msg = `${r.name.toUpperCase()} IS STILL PLAYING: ${r.score}`;
+    drawText('VERSUS', W / 2 + 150, 190, { size: 11, color: '#ff4fd8' });
+    if (!ui.isOpen()) drawText(msg, W / 2, 470, { size: 12, color: '#ff4fd8' });
+    return;
+  }
   if (stateTime > 1 && !ui.isOpen() && Math.floor(time * 2) % 2 === 0) {
     const again = mode === 'daily' ? 'FOR MENU' : 'TO PLAY AGAIN';
     drawText((isTouch() ? 'TAP ' : 'PRESS ENTER ') + again, W / 2, 470, { size: 14, glow: '#ffffff', blur: 8 });
@@ -2355,7 +2539,9 @@ function render() {
   else {
     drawWorld();
     drawHUD();
+    drawRivalHUD();
     drawBanner();
+    drawCountdown();
     if (state === 'paused') drawPause();
     if (state === 'gameover') drawGameOver();
   }
@@ -2374,6 +2560,12 @@ function isTouch() { return touchUI && touchUI.classList.contains('on'); }
 function confirm() {
   if (state === 'menu') { Sound.select(); startFromMenu(); }
   else if (state === 'gameover' && stateTime > 1) {
+    if (mode === 'versus') {
+      // Si el resultado ya está, el panel maneja la revancha; si no, se espera al rival
+      if (!match || match.status === 'closed' || match.status === 'error') { Sound.select(); leaveMatch(); backToMenu(2); }
+      else if (vsResult && !ui.isOpen()) showVersusResult();
+      return;
+    }
     Sound.select();
     if (mode === 'daily') backToMenu(1);
     else newGame();
@@ -2383,6 +2575,7 @@ function confirm() {
 
 function startFromMenu() {
   if (menuSel === 1) openDailyPanel();
+  else if (menuSel === 2) openVersusLobby();
   else newGame();
 }
 
@@ -2394,12 +2587,14 @@ function backToMenu(sel = 0) {
 // Opciones del menú (coordenadas del canvas lógico)
 const MENU_Y = 378;
 const MENU_OPTS = [
-  { label: 'PLAY', x: W / 2 - 150 },
-  { label: 'DAILY CHALLENGE', x: W / 2 + 150 },
+  { label: 'PLAY', x: W / 2 - 290 },
+  { label: 'DAILY CHALLENGE', x: W / 2 },
+  { label: 'VERSUS 1V1', x: W / 2 + 290 },
 ];
+const MENU_HALF = 130;
 
 function menuHit(px, py) {
-  return MENU_OPTS.findIndex((o) => Math.abs(px - o.x) <= 130 && Math.abs(py - MENU_Y) <= 23);
+  return MENU_OPTS.findIndex((o) => Math.abs(px - o.x) <= MENU_HALF && Math.abs(py - MENU_Y) <= 23);
 }
 
 function toCanvas(e) {
@@ -2408,6 +2603,7 @@ function toCanvas(e) {
 }
 
 function togglePause() {
+  if (mode === 'versus' && state === 'playing') return;
   if (state === 'playing') { state = 'paused'; input.keys.clear(); }
   else if (state === 'paused') { state = 'playing'; }
 }
@@ -2425,9 +2621,14 @@ function frame(now) {
   last = now;
   pollGamepad();
   if (state !== 'paused') {
-    if (state === 'playing') {
+    if (state === 'playing' && vsCountdown > 0) {
+      // En tiempo real (no del juego): los dos arrancan al mismo instante aunque uno vaya lento
+      vsCountdown = Math.max(0, (vsStartAt - now) / 1000);
+      if (vsCountdown === 0) { if (match) match.began(); Sound.select(); }
+    } else if (state === 'playing') {
       if (hitStop > 0) { hitStop -= dt; dt *= 0.15; }
       update(dt);
+      if (mode === 'versus') versusTick();
     }
     updateAmbient(dt);
     time += dt;
@@ -2493,6 +2694,9 @@ if (TEST_MODE) {
     },
     freeze() { cheated = true; invaders.forEach((i) => (i.dead = true)); enemyBullets.length = 0; },
     get cheated() { return cheated; },
+    get vs() {
+      return match ? { status: match.status, rival: match.rival, round: match.round, seed: match.seed, countdown: vsCountdown, incoming: vsIncoming, result: vsResult && vsResult.outcome } : null;
+    },
     get achievements() { return achievements.list().filter((a) => a.unlocked).map((a) => a.id); },
     skipTo(n) { if (state === 'playing') { cheated = true; startWave(n); } },
     killAll() {

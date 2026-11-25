@@ -26,6 +26,7 @@ Shooter arcade inspirado en Space Invaders, en JavaScript puro: sin frameworks n
 - **Jefes por sector:** MOTHERSHIP (oleada 5), **MAGMA** (10, medusa de lava que llueve lava, suelta crías y se teletransporta), **TITAN** (15, núcleo de roca con un escudo de rocas que orbitan, se regeneran y te las tira), **VORTEX** (20, se traga tus disparos, te atrae y te los devuelve) y **SOLAR PHOENIX** (25, pica hacia tu nave y revive una vez). Desde la oleada 30 vuelven más rápidos (MOTHERSHIP MK II, MAGMA +1…)
 - **Logros:** 23 logros guardados en el dispositivo (combate, habilidad, progreso y jefes), con aviso al desbloquearlos y pantalla propia (tecla L o 🏅)
 - **Ranking renovado:** podio con medallas, tarjeta con tu puesto y cuántos puntos te faltan para pasar al de arriba, sector alcanzado por color y hace cuánto se jugó
+- **Versus 1 contra 1 en vivo:** creás una sala, le pasás el código o el link a un amigo y juegan las mismas oleadas al mismo tiempo. Ves su puntaje y sus vidas en vivo, y cada oleada que limpiás (o cada jefe o combo de 10) le manda invasores extra. Gana el que termina con más puntos; hay revancha. Usa Supabase Realtime (Broadcast), sin tablas nuevas
 - **Opciones:** volumen, temblor, destellos, efecto TV, vibración, botones táctiles grandes y modo zurdo (respeta "reducir movimiento" del sistema)
 - **Mando:** también navega todas las pantallas (cruz o stick, A elige, B vuelve)
 - **App instalable (PWA):** se agrega a la pantalla de inicio y funciona sin internet
@@ -44,10 +45,11 @@ Cómo funciona:
 - Las tablas están cerradas (RLS sin políticas): la clave pública sólo puede usar las funciones, que validan nombre, duración y puntaje posible para frenar trampas obvias.
 - Liga privada: se crea desde el ranking y se comparte con un link `?liga=CODIGO` (por WhatsApp, por ejemplo).
 - Desafío diario: `?modo=diario` abre el juego con el desafío elegido. El día cambia a las 00:00 UTC (21:00 en Argentina) y el servidor acepta un puntaje diario por dispositivo.
+- Versus: usa **Realtime Broadcast** con canales públicos `invaders-vs-CODIGO`; no guarda nada en la base. Si no conecta, revisá en **Realtime → Settings** que no esté activado "Private channels only".
 - Privacidad: se guarda el nombre que elige el jugador, el puntaje, la oleada, un ID anónimo del dispositivo y un hash de la IP para limitar abusos. No hay cuentas ni emails.
 
 ## Desarrollo
-Requisitos: Node 20+ y Python 3 (para el servidor local).
+Requisitos: Node 22+ y Python 3 (para el servidor local).
 
 ```bash
 npm install
@@ -55,6 +57,7 @@ npm start          # desarrollo: sirve la raíz en http://127.0.0.1:4173
 npm run build      # arma dist/ con sólo lo que se publica
 npm run preview    # build + sirve dist/ (igual que producción)
 npm run lint       # ESLint
+npm run test:unit  # tests de lógica pura (logros, salas del versus) con node --test
 npm test           # tests en navegador real (Playwright) contra dist/: escritorio, celular y PWA
 npm run test:db    # tests del esquema SQL (necesita DATABASE_URL de un Postgres vacío)
 ```

@@ -150,8 +150,8 @@ test.describe('desafío diario', () => {
   test('tocar la opción del desafío en el canvas la elige', async ({ page }) => {
     await openGame(page);
     const box = await page.locator('#game').boundingBox();
-    // Opción derecha del menú: x = W/2 + 150, y = 378 en coordenadas lógicas (1024 × 576)
-    await page.mouse.click(box.x + ((512 + 150) / 1024) * box.width, box.y + (378 / 576) * box.height);
+    // Opción del medio del menú: x = W/2, y = 378 en coordenadas lógicas (1024 × 576)
+    await page.mouse.click(box.x + (512 / 1024) * box.width, box.y + (378 / 576) * box.height);
     await expect(panel(page)).toContainText('DESAFÍO DIARIO');
   });
 });

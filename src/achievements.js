@@ -20,6 +20,7 @@ export const ACHIEVEMENTS = [
   { id: 'sniper', group: 'habilidad', icon: '🔭', name: 'FRANCOTIRADOR', desc: 'Terminá una partida con 80% de precisión (100 disparos o más)' },
   { id: 'loaded', group: 'habilidad', icon: '🧰', name: 'A FULL', desc: 'Juntá 8 mejoras en una misma partida' },
   { id: 'daily', group: 'habilidad', icon: '📅', name: 'MADRUGADOR', desc: 'Terminá un desafío diario' },
+  { id: 'duelist', group: 'habilidad', icon: '⚔️', name: 'DUELISTA', desc: 'Ganá un versus 1 contra 1' },
   { id: 'wave10', group: 'progreso', icon: '🚀', name: 'SOBREVIVIENTE', desc: 'Llegá a la oleada 10' },
   { id: 'wave20', group: 'progreso', icon: '🌌', name: 'VETERANO', desc: 'Llegá a la oleada 20' },
   { id: 'wave30', group: 'progreso', icon: '🌠', name: 'LEYENDA', desc: 'Llegá a la oleada 30' },
@@ -103,6 +104,7 @@ export function createAchievements({ load, save, onUnlock = () => {}, now = () =
       if (!data.bosses.includes(kind)) { data.bosses.push(kind); dirty = true; }
       if (data.bosses.length >= BOSS_KINDS.length) unlock('pantheon');
     },
+    versusWin() { unlock('duelist'); },
     gameOver({ shots, hits, daily }) {
       if (shots >= 100 && hits / shots >= 0.8) unlock('sniper');
       if (daily) unlock('daily');
