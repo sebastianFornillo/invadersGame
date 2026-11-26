@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "test": "playwright test",
     "test:db": "psql \"$DATABASE_URL\" -q -v ON_ERROR_STOP=1 -f supabase/tests/setup.sql -f supabase/schema.sql -f supabase/tests/schema.test.sql",
-    "check": "npm run lint && npm test"
+    "check": "npm run lint && npm run test:unit && npm test",
+    "test:unit": "node --test \"tests/unit/*.unit.mjs\""
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",

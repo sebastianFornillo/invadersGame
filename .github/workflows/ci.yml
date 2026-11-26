@@ -36,6 +36,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - name: Tests unitarios (lógica pura)
+        run: npm run test:unit
       - name: Tests de la base del ranking (supabase/schema.sql)
         run: npm run test:db
       - run: npx playwright install --with-deps chromium
