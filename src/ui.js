@@ -4,6 +4,7 @@ import {
   api, online, league, playerName, inviteLink, cleanName,
   NAME_RE, LEAGUE_NAME_RE, LEAGUE_CODE_RE,
 } from './online.js';
+import { VS_CODE_RE } from './versus.js';
 import { formatDay, gridText, shareText, dailyLink } from './daily.js';
 import { settings } from './settings.js';
 import { canVibrate } from './platform.js';
@@ -772,6 +773,142 @@ function openOptions({ onClose } = {}) {
 }
 
 // ---------------------------------------------------------------------
+// Versus 1 contra 1
+// ---------------------------------------------------------------------
+export function versusLink(code) {
+  const u = new URL(location.href);
+  u.search = '';
+  u.hash = '';
+  u.searchParams.set('vs', code);
+  return u.toString();
+}
+
+async function shareVersus(code) {
+  const link = versusLink(code);
+  const text = `¡Te reto a un versus en Invaders Space! Sala ${code} ⚔️`;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Invaders Space · Versus', text, url: link });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(`${text} ${link}`);
+    toast('Link copiado: mandáselo a tu rival');
+  } catch {
+    toast(link, 8000);
+  }
+}
+
+function nameInput() {
+  return h('input', {
+    id: 'vsName', name: 'nickname', maxlength: '12', autocomplete: 'nickname', spellcheck: 'false',
+    placeholder: 'TU NOMBRE', 'aria-label': 'Tu nombre', value: playerName.get(),
+  });
+}
+
+// Lobby: crear una sala o entrar con un código
+function openVersus({ code = '', onCreate, onJoin, onClose } = {}) {
+  const name = nameInput();
+  const codeIn = h('input', {
+    id: 'vsCode', maxlength: '5', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'characters',
+    placeholder: 'CÓDIGO', 'aria-label': 'Código de la sala', value: code, 'data-autofocus': Boolean(code),
+  });
+  const err = h('p', { class: 'error', role: 'alert' });
+  const validName = () => {
+    const n = cleanName(name.value);
+    if (!NAME_RE.test(n)) { err.textContent = 'Poné tu nombre: de 2 a 12 letras o números.'; name.focus(); return null; }
+    playerName.set(n);
+    return n;
+  };
+  const pnl = panel(
+    'VERSUS 1 VS 1',
+    h('p', { class: 'muted', text: 'Las mismas oleadas para los dos, al mismo tiempo. Cada oleada que limpiás le manda invasores a tu rival.' }),
+    h('div', { class: 'row' }, name),
+    h('div', { class: 'row' },
+      h('button', {
+        class: 'btn wide', 'data-autofocus': !code, text: 'CREAR SALA',
+        onclick: () => { const n = validName(); if (n) onCreate(n); },
+      })),
+    h('p', { class: 'muted small', text: '— o entrá a la de un amigo —' }),
+    h('form', {
+      class: 'row',
+      onsubmit: (e) => {
+        e.preventDefault();
+        const c = codeIn.value.trim().toUpperCase();
+        if (!VS_CODE_RE.test(c)) { err.textContent = 'El código tiene 5 letras o números.'; codeIn.focus(); return; }
+        const n = validName();
+        if (n) onJoin(c, n);
+      },
+    }, codeIn, h('button', { class: 'btn', type: 'submit', text: 'ENTRAR' })),
+    err,
+  );
+  pnl.classList.add('versus');
+  open(pnl, { onClose });
+}
+
+// Sala: muestra el código mientras espera al rival
+function versusRoom({ code, onCancel }) {
+  const statusEl = h('p', { class: 'vsstatus', role: 'status', text: 'Conectando…' });
+  const rivalEl = h('p', { class: 'big', hidden: true });
+  const pnl = panel(
+    'SALA',
+    h('p', { class: 'muted', text: 'Pasale este código a tu rival' }),
+    h('p', { class: 'code', 'data-code': code, text: code }),
+    h('footer', {}, h('button', { class: 'btn', 'data-autofocus': true, onclick: () => shareVersus(code), text: 'INVITAR' })),
+    rivalEl,
+    statusEl,
+  );
+  pnl.classList.add('versus');
+  open(pnl, { onClose: onCancel });
+  return {
+    update({ status, rival, error }) {
+      if (rival) { rivalEl.hidden = false; rivalEl.textContent = `⚔️ ${rival.name}`; }
+      const texts = {
+        connecting: 'Conectando…',
+        waiting: 'Esperando rival…',
+        ready: '¡Rival encontrado!',
+        countdown: '¡Arrancamos!',
+        full: 'Esa sala ya tiene dos jugadores.',
+        error: `No se pudo conectar. ${error || ''}`,
+        closed: 'Se cerró la sala.',
+      };
+      statusEl.textContent = texts[status] || '';
+      statusEl.classList.toggle('error', status === 'error' || status === 'full');
+    },
+  };
+}
+
+// Resultado del duelo, con revancha
+function versusResult({ outcome, reason, me, rival, onRematch, onMenu }) {
+  const title = { win: '¡GANASTE!', lose: 'PERDISTE', draw: 'EMPATE' }[outcome];
+  const again = h('button', { class: 'btn', 'data-autofocus': true, text: 'REVANCHA', disabled: Boolean(rival.gone) });
+  const note = h('p', { class: 'muted', role: 'status', text: reason === 'disconnect' ? `${rival.name} se desconectó` : '' });
+  again.addEventListener('click', () => {
+    if (onRematch()) { again.disabled = true; again.textContent = 'ESPERANDO…'; note.textContent = `Esperando que ${rival.name} acepte…`; }
+  });
+  const card = (p, cls) => h('div', { class: `vscard ${cls}` },
+    h('span', { class: 'name', text: p.name }),
+    h('span', { class: 'pts', text: fmt(p.score) }),
+    h('span', { class: 'muted', text: `oleada ${p.wave}` }));
+  const pnl = panel(
+    'VERSUS',
+    h('p', { class: `vsresult ${outcome}`, text: title }),
+    h('div', { class: 'vscards' }, card(me, outcome === 'win' ? 'lead' : ''), h('span', { class: 'vs', text: 'VS' }), card(rival, outcome === 'lose' ? 'lead' : '')),
+    note,
+    h('footer', {}, h('button', { class: 'btn ghost', onclick: onMenu, text: 'MENÚ' }), again),
+  );
+  pnl.classList.add('versus');
+  open(pnl, { locked: true });
+  return {
+    rivalWantsRematch() { if (!again.disabled) note.textContent = `${rival.name} quiere la revancha`; },
+    rivalLeft() { again.disabled = true; again.textContent = 'REVANCHA'; note.textContent = `${rival.name} se fue`; },
+  };
+}
+
+// ---------------------------------------------------------------------
 // Link de invitación: ?liga=CODIGO
 // ---------------------------------------------------------------------
 async function handleInvite() {
@@ -805,6 +942,9 @@ export const ui = {
   setAchievementsOpener,
   achievement,
   openSubmit,
+  openVersus,
+  versusRoom,
+  versusResult,
   openLeagues,
   openDaily,
   shareDaily,

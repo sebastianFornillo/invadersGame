@@ -542,7 +542,8 @@ html, body {
 .achtoast {
     position: fixed;
     top: 64px;
-    right: 14px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 31;
     display: flex;
     align-items: center;
@@ -560,10 +561,34 @@ html, body {
 .achtoast small { display: block; color: #ffd23f; font-size: 7px; margin-bottom: 3px; }
 .achtoast.show { animation: achin 3s ease both; }
 @keyframes achin {
-    0% { opacity: 0; transform: translateX(40px) scale(0.9); }
-    10%, 85% { opacity: 1; transform: none; }
-    100% { opacity: 0; transform: translateY(-10px); }
+    0% { opacity: 0; transform: translate(-50%, -16px) scale(0.9); }
+    10%, 85% { opacity: 1; transform: translate(-50%, 0); }
+    100% { opacity: 0; transform: translate(-50%, -10px); }
 }
 @media (prefers-reduced-motion: reduce) {
     .podium .step, .board li, .skeleton i, .achtoast.show { animation: none; }
 }
+
+/* ---------- Versus ---------- */
+.btn.wide { flex: 1; }
+.vsstatus { min-height: 1.6em; color: #5dc1b9; }
+.vsstatus.error { color: #ff6b81; }
+.vsresult { margin: 6px 0 12px; font-size: 26px; }
+.vsresult.win { color: #ffd23f; text-shadow: 0 0 16px rgba(255, 210, 63, 0.7); }
+.vsresult.lose { color: #ff6b81; }
+.vsresult.draw { color: #5dc1b9; }
+.vscards { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; }
+.vscards .vs { color: #ff4fd8; font-size: 14px; }
+.vscard {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    min-width: 0;
+}
+.vscard.lead { border-color: #ffd23f; background: rgba(255, 210, 63, 0.1); }
+.vscard .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vscard .pts { font-size: 16px; color: #fff; }
